@@ -1,3 +1,4 @@
+import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk.bundled.js'
 import {
   Background,
   Controls,
@@ -12,10 +13,28 @@ import {
   type Node
 } from '@xyflow/react'
 import { Crosshair, ExternalLink } from 'lucide-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { GraphNodePayload, NoteGraph } from '../../../shared/notes'
+
+const elk = new ELK()
+
+const NODE_WIDTH = 370
+const NODE_MIN_HEIGHT = 220
+const NODE_MAX_HEIGHT = 760
+const NODE_GAP = 64
+const LAYER_GAP = 200
+const ELK_LAYOUT_OPTIONS = {
+  'elk.algorithm': 'layered',
+  'elk.direction': 'RIGHT',
+  'elk.edgeRouting': 'SPLINES',
+  'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+  'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+  'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+  'elk.spacing.nodeNode': `${NODE_GAP}`,
+  'elk.layered.spacing.nodeNodeBetweenLayers': `${LAYER_GAP}`
+} as const
 
 interface GraphCanvasProps {
   graph: NoteGraph | null
@@ -23,78 +42,48 @@ interface GraphCanvasProps {
   onOpenNote: (filename: string) => void
 }
 
-type ColumnKey =
-  'far-left' | 'left' | 'center' | 'right' | 'far-right' | 'upper-center' | 'lower-center'
-
-interface PositionedNode {
+interface LayoutedNode {
   note: GraphNodePayload
-  x: number
-  y: number
-  column: ColumnKey
+  position: { x: number; y: number }
+  sourcePosition: Position
+  targetPosition: Position
 }
 
-const columnLayout: Record<ColumnKey, { x: number; baseY: number }> = {
-  'far-left': { x: -1080, baseY: 0 },
-  left: { x: -540, baseY: 0 },
-  center: { x: 0, baseY: 0 },
-  right: { x: 540, baseY: 0 },
-  'far-right': { x: 1080, baseY: 0 },
-  'upper-center': { x: 0, baseY: -560 },
-  'lower-center': { x: 0, baseY: 560 }
+interface LayoutedGraph {
+  nodes: LayoutedNode[]
+  edges: Edge[]
 }
 
-function FlowScene({ graph, onOpenNote }: Omit<GraphCanvasProps, 'loading'>): React.JSX.Element {
+function FlowScene({
+  graph,
+  onOpenNote
+}: {
+  graph: NoteGraph
+  onOpenNote: (filename: string) => void
+}): React.JSX.Element {
   const { fitView } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
-  const positionedNodes = graph ? layoutGraph(graph) : []
-  const nodeIds = new Set(positionedNodes.map((node) => node.note.filename))
-
-  const nodes: Node[] = positionedNodes.map((item) => ({
-    id: item.note.filename,
-    position: { x: item.x, y: item.y },
-    sourcePosition: getSourcePosition(item.column),
-    targetPosition: getTargetPosition(item.column),
-    selectable: true,
-    dragHandle: '.note-drag-handle',
-    data: {
-      label: <NoteCard note={item.note} onOpenNote={onOpenNote} />
-    }
-  }))
-
-  const edges: Edge[] = (graph?.edges ?? [])
-    .filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
-    .map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: 'smoothstep',
-      label: edge.label,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-        color: edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d'
-      },
-      labelStyle: {
-        fill: '#6b5143',
-        fontSize: 11,
-        fontWeight: 700
-      },
-      labelBgStyle: {
-        fill: '#fffaf4',
-        fillOpacity: 0.94
-      },
-      labelBgBorderRadius: 999,
-      labelBgPadding: [8, 4],
-      style: {
-        stroke: edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d',
-        strokeWidth: edge.depth === 1 ? 1.7 : 1.2,
-        opacity: edge.depth === 1 ? 0.88 : 0.58
-      }
-    }))
+  const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [], edges: [] })
 
   useEffect(() => {
-    if (!graph || !nodesInitialized) {
+    let cancelled = false
+
+    const runLayout = async (): Promise<void> => {
+      const nextLayout = await getLayoutedGraph(graph)
+      if (!cancelled) {
+        setLayouted(nextLayout)
+      }
+    }
+
+    void runLayout()
+
+    return () => {
+      cancelled = true
+    }
+  }, [graph])
+
+  useEffect(() => {
+    if (!nodesInitialized || layouted.nodes.length === 0) {
       return
     }
 
@@ -103,7 +92,7 @@ function FlowScene({ graph, onOpenNote }: Omit<GraphCanvasProps, 'loading'>): Re
       secondFrame = requestAnimationFrame(() => {
         void fitView({
           duration: 420,
-          minZoom: 0.22,
+          minZoom: 0.2,
           maxZoom: 1.15,
           padding: { top: 0.16, right: 0.2, bottom: 0.16, left: 0.2 }
         })
@@ -114,14 +103,26 @@ function FlowScene({ graph, onOpenNote }: Omit<GraphCanvasProps, 'loading'>): Re
       cancelAnimationFrame(firstFrame)
       cancelAnimationFrame(secondFrame)
     }
-  }, [fitView, graph, nodesInitialized])
+  }, [fitView, layouted.nodes.length, layouted.edges.length, graph.center, nodesInitialized])
+
+  const nodes: Node[] = layouted.nodes.map((item) => ({
+    id: item.note.filename,
+    position: item.position,
+    sourcePosition: item.sourcePosition,
+    targetPosition: item.targetPosition,
+    selectable: true,
+    dragHandle: '.note-drag-handle',
+    data: {
+      label: <NoteCard note={item.note} onOpenNote={onOpenNote} />
+    }
+  }))
 
   return (
     <ReactFlow
       fitView
       nodeOrigin={[0.5, 0.5]}
       nodes={nodes}
-      edges={edges}
+      edges={layouted.edges}
       minZoom={0.14}
       maxZoom={1.5}
       panOnScroll
@@ -129,7 +130,7 @@ function FlowScene({ graph, onOpenNote }: Omit<GraphCanvasProps, 'loading'>): Re
       selectionOnDrag
       proOptions={{ hideAttribution: true }}
       defaultEdgeOptions={{
-        type: 'smoothstep',
+        type: 'bezier',
         zIndex: 0
       }}
     >
@@ -138,7 +139,7 @@ function FlowScene({ graph, onOpenNote }: Omit<GraphCanvasProps, 'loading'>): Re
         pannable
         zoomable
         maskColor="rgba(243, 236, 227, 0.72)"
-        nodeColor={(node) => (node.id === graph?.center ? '#d46541' : '#6e9d9a')}
+        nodeColor={(node) => (node.id === graph.center ? '#d46541' : '#6e9d9a')}
       />
       <Controls showInteractive={false} />
     </ReactFlow>
@@ -229,82 +230,142 @@ export default function GraphCanvas({
   )
 }
 
-function layoutGraph(graph: NoteGraph): PositionedNode[] {
-  const groups = new Map<ColumnKey, GraphNodePayload[]>()
-
-  for (const note of graph.nodes) {
-    const column = getColumn(note)
-    const items = groups.get(column) ?? []
-    items.push(note)
-    groups.set(column, items)
-  }
-
-  const positioned: PositionedNode[] = []
-
-  for (const [column, items] of groups.entries()) {
-    const config = columnLayout[column]
-    const ordered = [...items].sort((left, right) => {
-      if (left.depth === 0 || right.depth === 0) {
-        return left.depth - right.depth
+async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
+  const nodeSizes = new Map(
+    graph.nodes.map((note) => [
+      note.filename,
+      {
+        width: NODE_WIDTH,
+        height: estimateNodeHeight(note)
       }
+    ])
+  )
 
-      return right.degree - left.degree || left.filename.localeCompare(right.filename)
-    })
-    const heights = ordered.map((note) => estimateNodeHeight(note))
-    const totalHeight =
-      heights.reduce((sum, height) => sum + height, 0) + Math.max(0, heights.length - 1) * 46
-    let cursor = config.baseY - totalHeight / 2
-
-    for (let index = 0; index < ordered.length; index += 1) {
-      const note = ordered[index]
-      const height = heights[index]
-      positioned.push({
-        note,
-        x: config.x,
-        y: cursor + height / 2,
-        column
-      })
-      cursor += height + 46
-    }
+  const elkGraph: ElkNode = {
+    id: 'root',
+    layoutOptions: ELK_LAYOUT_OPTIONS,
+    children: graph.nodes.map((note) => ({
+      id: note.filename,
+      width: nodeSizes.get(note.filename)?.width ?? NODE_WIDTH,
+      height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
+    })),
+    edges: graph.edges.map((edge): ElkExtendedEdge => ({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target]
+    }))
   }
 
-  return positioned.sort((left, right) => left.note.depth - right.note.depth)
+  const layout = await elk.layout(elkGraph)
+  const children = layout.children ?? []
+  const centerNode = children.find((node) => node.id === graph.center)
+  const centerOffsetX = (centerNode?.x ?? 0) + (centerNode?.width ?? NODE_WIDTH) / 2
+  const centerOffsetY = (centerNode?.y ?? 0) + (centerNode?.height ?? NODE_MIN_HEIGHT) / 2
+
+  const positions = new Map(
+    children.map((node) => [
+      node.id,
+      {
+        x: (node.x ?? 0) + (node.width ?? NODE_WIDTH) / 2 - centerOffsetX,
+        y: (node.y ?? 0) + (node.height ?? NODE_MIN_HEIGHT) / 2 - centerOffsetY
+      }
+    ])
+  )
+
+  const layoutedNodes: LayoutedNode[] = graph.nodes.map((note) => ({
+    note,
+    position: positions.get(note.filename) ?? { x: 0, y: 0 },
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left
+  }))
+
+  const nodeById = new Map(layoutedNodes.map((node) => [node.note.filename, node]))
+
+  for (const node of layoutedNodes) {
+    const outgoingNeighbors = graph.edges
+      .filter((edge) => edge.source === node.note.filename)
+      .map((edge) => nodeById.get(edge.target))
+      .filter((neighbor): neighbor is LayoutedNode => Boolean(neighbor))
+
+    const incomingNeighbors = graph.edges
+      .filter((edge) => edge.target === node.note.filename)
+      .map((edge) => nodeById.get(edge.source))
+      .filter((neighbor): neighbor is LayoutedNode => Boolean(neighbor))
+
+    node.sourcePosition = resolveHandleSide(node.position, outgoingNeighbors, Position.Right)
+    node.targetPosition = resolveHandleSide(node.position, incomingNeighbors, Position.Left)
+  }
+
+  const edges: Edge[] = graph.edges
+    .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
+    .map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: 'bezier',
+      label: edge.label,
+      pathOptions: {
+        curvature: 0.32
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 16,
+        height: 16,
+        color: edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d'
+      },
+      labelStyle: {
+        fill: '#6b5143',
+        fontSize: 11,
+        fontWeight: 700
+      },
+      labelBgStyle: {
+        fill: '#fffaf4',
+        fillOpacity: 0.94
+      },
+      labelBgBorderRadius: 999,
+      labelBgPadding: [8, 4],
+      style: {
+        stroke: edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d',
+        strokeWidth: edge.depth === 1 ? 1.7 : 1.2,
+        opacity: edge.depth === 1 ? 0.88 : 0.58
+      }
+    }))
+
+  return {
+    nodes: layoutedNodes,
+    edges
+  }
 }
 
-function getColumn(note: GraphNodePayload): ColumnKey {
-  if (note.depth === 0) {
-    return 'center'
+function resolveHandleSide(
+  origin: { x: number; y: number },
+  neighbors: LayoutedNode[],
+  fallback: Position
+): Position {
+  if (neighbors.length === 0) {
+    return fallback
   }
 
-  if (note.direction === 'incoming') {
-    return note.depth === 1 ? 'left' : 'far-left'
+  const vector = neighbors.reduce(
+    (acc, neighbor) => ({
+      x: acc.x + (neighbor.position.x - origin.x),
+      y: acc.y + (neighbor.position.y - origin.y)
+    }),
+    { x: 0, y: 0 }
+  )
+
+  if (Math.abs(vector.x) >= Math.abs(vector.y)) {
+    return vector.x >= 0 ? Position.Right : Position.Left
   }
 
-  if (note.direction === 'outgoing') {
-    return note.depth === 1 ? 'right' : 'far-right'
-  }
-
-  return note.depth === 1 ? 'upper-center' : 'lower-center'
+  return vector.y >= 0 ? Position.Bottom : Position.Top
 }
 
 function estimateNodeHeight(note: GraphNodePayload): number {
   const lineCount = note.body.split('\n').length
   const textWeight = Math.ceil(note.body.length / 110)
-  return Math.min(Math.max(220, 120 + Math.max(lineCount, textWeight) * 20), 760)
-}
-
-function getSourcePosition(column: ColumnKey): Position {
-  if (column === 'center' || column === 'upper-center' || column === 'lower-center') {
-    return Position.Right
-  }
-
-  return column.includes('left') ? Position.Right : Position.Left
-}
-
-function getTargetPosition(column: ColumnKey): Position {
-  if (column === 'center' || column === 'upper-center' || column === 'lower-center') {
-    return Position.Left
-  }
-
-  return column.includes('left') ? Position.Right : Position.Left
+  return Math.min(
+    Math.max(NODE_MIN_HEIGHT, 120 + Math.max(lineCount, textWeight) * 20),
+    NODE_MAX_HEIGHT
+  )
 }

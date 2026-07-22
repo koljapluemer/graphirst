@@ -25,6 +25,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@xyflow/react": "^12.11.2",
     "electron-updater": "^6.3.9",
+    "elkjs": "^0.12.0",
     "flexsearch": "^0.8.212",
     "lucide-react": "^1.25.0",
     "react-markdown": "^10.1.0",

@@ -1,0 +1,156 @@
+@import 'tailwindcss';
+@plugin "daisyui" {
+  themes: autumn --default;
+}
+@import '@xyflow/react/dist/style.css';
+@import './base.css';
+
+body {
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(226, 239, 237, 0.85), transparent 34%),
+    radial-gradient(circle at top right, rgba(248, 214, 186, 0.92), transparent 30%),
+    linear-gradient(180deg, #f6f0e7 0%, #efe4d6 100%);
+  user-select: none;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.react-flow__renderer,
+.react-flow__viewport {
+  cursor: grab;
+}
+
+.react-flow__renderer:active,
+.react-flow__viewport:active {
+  cursor: grabbing;
+}
+
+.react-flow__node {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.react-flow__node.selectable.selected .note-card,
+.react-flow__node.selectable:focus .note-card {
+  transform: translateY(-4px);
+  box-shadow:
+    0 26px 60px rgba(122, 95, 74, 0.18),
+    0 0 0 2px rgba(213, 105, 69, 0.35);
+}
+
+.react-flow__edge-text {
+  font-family: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
+}
+
+.react-flow__controls,
+.react-flow__minimap {
+  border: 1px solid rgba(205, 184, 166, 0.9);
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(122, 95, 74, 0.08);
+  overflow: hidden;
+}
+
+.note-card {
+  width: 370px;
+}
+
+.note-card-center {
+  background: linear-gradient(180deg, rgba(255, 250, 244, 0.98), rgba(255, 244, 234, 0.97)), white;
+}
+
+.note-card-missing {
+  border-style: dashed;
+}
+
+.note-markdown {
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.note-markdown > * + * {
+  margin-top: 0.9rem;
+}
+
+.note-markdown h1,
+.note-markdown h2,
+.note-markdown h3,
+.note-markdown h4 {
+  font-family: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 1.2rem;
+}
+
+.note-markdown h1 {
+  font-size: 1.45rem;
+}
+
+.note-markdown h2 {
+  font-size: 1.18rem;
+}
+
+.note-markdown h3 {
+  font-size: 1rem;
+}
+
+.note-markdown ul,
+.note-markdown ol {
+  padding-left: 1.2rem;
+}
+
+.note-markdown ul {
+  list-style: disc;
+}
+
+.note-markdown ol {
+  list-style: decimal;
+}
+
+.note-markdown blockquote {
+  border-left: 3px solid rgba(180, 113, 79, 0.38);
+  padding-left: 0.9rem;
+  color: #7a6051;
+}
+
+.note-markdown code {
+  border-radius: 0.45rem;
+  background: rgba(238, 226, 213, 0.8);
+  padding: 0.12rem 0.36rem;
+  font-family: 'Berkeley Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.note-markdown pre {
+  overflow-x: auto;
+  border-radius: 1rem;
+  background: #f0e8de;
+  padding: 0.9rem 1rem;
+}
+
+.note-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.note-markdown a {
+  color: #0f6f6d;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.note-markdown hr {
+  border: 0;
+  border-top: 1px solid rgba(213, 194, 177, 0.8);
+}

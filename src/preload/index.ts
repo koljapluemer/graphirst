@@ -1,0 +1,31 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import { electronAPI } from '@electron-toolkit/preload'
+import type { NotesApi } from '../shared/notes'
+
+const notesApi: NotesApi = {
+  getBootstrap: () => ipcRenderer.invoke('notes:get-bootstrap'),
+  search: (query) => ipcRenderer.invoke('notes:search', query),
+  openNote: (filename) => ipcRenderer.invoke('notes:open', filename),
+  pickDirectory: () => ipcRenderer.invoke('notes:pick-directory'),
+  refresh: () => ipcRenderer.invoke('notes:refresh')
+}
+
+const api = {
+  notes: notesApi
+}
+
+if (process.contextIsolated) {
+  try {
+    contextBridge.exposeInMainWorld('electron', electronAPI)
+    contextBridge.exposeInMainWorld('api', api)
+  } catch (error) {
+    console.error(error)
+  }
+} else {
+  const target = window as typeof window & {
+    electron: typeof electronAPI
+    api: typeof api
+  }
+  target.electron = electronAPI
+  target.api = api
+}

@@ -16,7 +16,7 @@ import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import FloatingEdge from './FloatingEdge'
-import type { GraphNodePayload, NoteGraph } from '../../../shared/notes'
+import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge }
 
@@ -285,41 +285,126 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
 
   const nodeById = new Map(layoutedNodes.map((node) => [node.note.filename, node]))
 
-  const edges: Edge[] = graph.edges
-    .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
-    .map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: 'floating',
-      label: edge.label,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-        color: edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d'
-      },
-      labelStyle: {
-        fill: '#6b5143',
-        fontSize: 11,
-        fontWeight: 700
-      },
-      labelBgStyle: {
-        fill: '#fffaf4',
-        fillOpacity: 0.94
-      },
-      labelBgBorderRadius: 999,
-      labelBgPadding: [8, 4],
-      style: {
-        stroke: edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d',
-        strokeWidth: edge.depth === 1 ? 1.7 : 1.2,
-        opacity: edge.depth === 1 ? 0.88 : 0.58
+  const validEdges = graph.edges.filter(
+    (edge) => nodeById.has(edge.source) && nodeById.has(edge.target)
+  )
+
+  const pairGroups = new Map<string, GraphEdgePayload[]>()
+  for (const edge of validEdges) {
+    const pairKey = [edge.source, edge.target].sort().join('__')
+    const group = pairGroups.get(pairKey)
+    if (group) {
+      group.push(edge)
+    } else {
+      pairGroups.set(pairKey, [edge])
+    }
+  }
+
+  const edges: Edge[] = []
+  for (const group of pairGroups.values()) {
+    if (group.length === 2 && isReciprocalPair(group[0], group[1])) {
+      edges.push(buildReciprocalEdge(group[0], group[1], positions))
+    } else {
+      for (const edge of group) {
+        edges.push(buildDirectedEdge(edge))
       }
-    }))
+    }
+  }
 
   return {
     nodes: layoutedNodes,
     edges
+  }
+}
+
+function isReciprocalPair(a: GraphEdgePayload, b: GraphEdgePayload): boolean {
+  return a.source !== a.target && a.source === b.target && a.target === b.source
+}
+
+function edgeVisualWeight(edge: GraphEdgePayload): { strokeWidth: number; opacity: number } {
+  return {
+    strokeWidth: edge.depth === 1 ? 1.7 : 1.2,
+    opacity: edge.depth === 1 ? 0.88 : 0.58
+  }
+}
+
+function buildDirectedEdge(edge: GraphEdgePayload): Edge {
+  const color = edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d'
+
+  return {
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    type: 'floating',
+    label: edge.label,
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color
+    },
+    labelStyle: {
+      fill: '#6b5143',
+      fontSize: 11,
+      fontWeight: 700
+    },
+    labelBgStyle: {
+      fill: '#fffaf4',
+      fillOpacity: 0.94
+    },
+    labelBgBorderRadius: 999,
+    labelBgPadding: [8, 4],
+    style: {
+      stroke: color,
+      ...edgeVisualWeight(edge)
+    }
+  }
+}
+
+function buildReciprocalEdge(
+  a: GraphEdgePayload,
+  b: GraphEdgePayload,
+  positions: Map<string, { x: number; y: number }>
+): Edge {
+  const posA = positions.get(a.source) ?? { x: 0, y: 0 }
+  const posB = positions.get(b.source) ?? { x: 0, y: 0 }
+  const aGoesFirst = posA.x - posB.x || posA.y - posB.y
+  const [first, second] = aGoesFirst <= 0 ? [a, b] : [b, a]
+  const color = '#6b5143'
+
+  return {
+    id: `${first.id}__reciprocal__${second.id}`,
+    source: first.source,
+    target: first.target,
+    type: 'floating',
+    label: `${first.label} | ${second.label}`,
+    markerStart: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color
+    },
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      width: 16,
+      height: 16,
+      color
+    },
+    labelStyle: {
+      fill: '#6b5143',
+      fontSize: 11,
+      fontWeight: 700
+    },
+    labelBgStyle: {
+      fill: '#fffaf4',
+      fillOpacity: 0.94
+    },
+    labelBgBorderRadius: 999,
+    labelBgPadding: [8, 4],
+    style: {
+      stroke: color,
+      ...edgeVisualWeight(first.depth <= second.depth ? first : second)
+    }
   }
 }
 

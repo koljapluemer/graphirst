@@ -82,10 +82,25 @@ export interface NotesOpenResponse {
   graph: NoteGraph
 }
 
+export interface CreateNoteRequest {
+  /** Filename (with extension) of the existing note the new note is being connected to. */
+  relatedFilename: string
+  /** Relation label. Falls back to a sensible default when blank. */
+  label: string
+  /** When false (default): relatedFilename -> newNote. When true: newNote -> relatedFilename. */
+  reverse: boolean
+  body: string
+}
+
+export interface CreateNoteResponse {
+  filename: string
+}
+
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
   search: (query: string) => Promise<NotesSearchResponse>
   openNote: (filename: string) => Promise<NotesOpenResponse>
   pickDirectory: () => Promise<NotesBootstrap>
   refresh: () => Promise<NotesBootstrap>
+  createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
 }

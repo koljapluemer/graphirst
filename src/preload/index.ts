@@ -7,7 +7,8 @@ const notesApi: NotesApi = {
   search: (query) => ipcRenderer.invoke('notes:search', query),
   openNote: (filename) => ipcRenderer.invoke('notes:open', filename),
   pickDirectory: () => ipcRenderer.invoke('notes:pick-directory'),
-  refresh: () => ipcRenderer.invoke('notes:refresh')
+  refresh: () => ipcRenderer.invoke('notes:refresh'),
+  createNote: (request) => ipcRenderer.invoke('notes:create', request)
 }
 
 const api = {

@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { NoteStore } from './note-store'
+import type { CreateNoteRequest } from '../shared/notes'
 
 let noteStore: NoteStore
 
@@ -60,6 +61,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:refresh', async () => {
     return noteStore.refresh()
+  })
+
+  ipcMain.handle('notes:create', async (_event, request: CreateNoteRequest) => {
+    return noteStore.createNote(request)
   })
 
   ipcMain.handle('notes:pick-directory', async () => {

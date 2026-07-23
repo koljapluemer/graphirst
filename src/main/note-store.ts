@@ -3,6 +3,8 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Document } from 'flexsearch'
 import type {
+  CreateNoteRequest,
+  CreateNoteResponse,
   GraphDirection,
   GraphEdgePayload,
   GraphNodePayload,
@@ -10,6 +12,7 @@ import type {
   IndexStats,
   NoteGraph,
   NoteLink,
+  NoteRelationTuple,
   NotesBootstrap,
   NotesOpenResponse,
   NotesSearchResponse,
@@ -157,6 +160,31 @@ export class NoteStore {
       stats: this.stats,
       graph: this.buildGraph(filename)
     }
+  }
+
+  async createNote(request: CreateNoteRequest): Promise<CreateNoteResponse> {
+    await this.ensureIndexed()
+
+    if (!this.notes.has(request.relatedFilename)) {
+      throw new Error(`Could not find "${request.relatedFilename}" in ${this.graphPath}.`)
+    }
+
+    const filename = this.generateFilename()
+    const label = request.label.trim() || 'related'
+
+    if (request.reverse) {
+      await this.writeNoteFile(filename, {
+        body: request.body,
+        rels: [[label, request.relatedFilename]]
+      })
+    } else {
+      await this.writeNoteFile(filename, { body: request.body, rels: [] })
+      await this.appendRelation(request.relatedFilename, [label, filename])
+    }
+
+    await this.ensureIndexed(true)
+
+    return { filename }
   }
 
   async loadSettings(): Promise<void> {
@@ -642,6 +670,32 @@ export class NoteStore {
 
   private tokenize(value: string): string[] {
     return value.match(/[\p{L}\p{N}_-]+/gu) ?? []
+  }
+
+  private generateFilename(): string {
+    let candidate: string
+    do {
+      candidate = `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`
+    } while (this.notes.has(candidate))
+    return candidate
+  }
+
+  private async writeNoteFile(
+    filename: string,
+    data: { body: string; rels: NoteRelationTuple[] }
+  ): Promise<void> {
+    await writeFile(join(this.graphPath, filename), JSON.stringify(data, null, 2), 'utf8')
+  }
+
+  /** Appends a relation to an existing note file without disturbing fields this app doesn't otherwise read/write. */
+  private async appendRelation(filename: string, relation: NoteRelationTuple): Promise<void> {
+    const path = join(this.graphPath, filename)
+    const raw = await readFile(path, 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const rels = Array.isArray(parsed.rels) ? parsed.rels : []
+    rels.push(relation)
+    parsed.rels = rels
+    await writeFile(path, JSON.stringify(parsed, null, 2), 'utf8')
   }
 
   private async persistSettings(): Promise<void> {

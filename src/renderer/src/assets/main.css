@@ -45,6 +45,20 @@ input {
   pointer-events: none;
 }
 
+.note-connect-handle {
+  width: 14px;
+  height: 14px;
+  background: #d36945;
+  border: 2px solid #fffaf4;
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 120ms ease;
+}
+
+.react-flow__node:hover .note-connect-handle {
+  opacity: 0.9;
+}
+
 .react-flow__node.selectable.selected .note-card,
 .react-flow__node.selectable:focus .note-card {
   transform: translateY(-4px);

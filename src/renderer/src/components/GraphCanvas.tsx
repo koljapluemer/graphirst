@@ -9,16 +9,18 @@ import {
   useNodesInitialized,
   useReactFlow,
   type Edge,
-  type Node
+  type OnConnectEnd,
+  type OnConnectStart
 } from '@xyflow/react'
-import { Crosshair, ExternalLink } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import FloatingEdge from './FloatingEdge'
+import NoteNode, { type NoteFlowNode } from './NoteNode'
 import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge }
+const nodeTypes = { note: NoteNode }
+
+const DRAFT_NODE_HEIGHT = 340
 
 const elk = new ELK()
 
@@ -56,6 +58,12 @@ interface LayoutedGraph {
   edges: Edge[]
 }
 
+interface DraftNote {
+  clientId: string
+  sourceFilename: string
+  position: { x: number; y: number }
+}
+
 function FlowScene({
   graph,
   onOpenNote
@@ -63,9 +71,11 @@ function FlowScene({
   graph: NoteGraph
   onOpenNote: (filename: string) => void
 }): React.JSX.Element {
-  const { fitView } = useReactFlow()
+  const { fitView, screenToFlowPosition } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
   const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [], edges: [] })
+  const [draft, setDraft] = useState<DraftNote | null>(null)
+  const connectingFromRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -107,26 +117,105 @@ function FlowScene({
     }
   }, [fitView, layouted.nodes.length, layouted.edges.length, graph.center, nodesInitialized])
 
-  const nodes: Node[] = layouted.nodes.map((item) => ({
+  const onConnectStart: OnConnectStart = useCallback((_event, { nodeId }) => {
+    connectingFromRef.current = nodeId
+  }, [])
+
+  const onConnectEnd: OnConnectEnd = useCallback(
+    (event) => {
+      const sourceFilename = connectingFromRef.current
+      connectingFromRef.current = null
+      if (!sourceFilename) {
+        return
+      }
+
+      const point = 'changedTouches' in event ? event.changedTouches[0] : event
+      if (!point || !('clientX' in point)) {
+        return
+      }
+
+      setDraft({
+        clientId: `draft:${sourceFilename}:${Date.now()}`,
+        sourceFilename,
+        position: screenToFlowPosition({ x: point.clientX, y: point.clientY })
+      })
+    },
+    [screenToFlowPosition]
+  )
+
+  const handleSaveDraft = async (
+    current: DraftNote,
+    body: string,
+    label: string,
+    reverse: boolean
+  ): Promise<void> => {
+    await window.api.notes.createNote({
+      relatedFilename: current.sourceFilename,
+      label,
+      reverse,
+      body
+    })
+    setDraft(null)
+    onOpenNote(graph.center)
+  }
+
+  const nodes: NoteFlowNode[] = layouted.nodes.map((item) => ({
     id: item.note.filename,
+    type: 'note',
     position: item.position,
     width: item.width,
     height: item.height,
     selectable: true,
     dragHandle: '.note-drag-handle',
     data: {
-      label: <NoteCard note={item.note} onOpenNote={onOpenNote} />
+      kind: 'note',
+      note: item.note,
+      onOpenNote
     }
   }))
+
+  if (draft) {
+    nodes.push({
+      id: draft.clientId,
+      type: 'note',
+      position: draft.position,
+      width: NODE_WIDTH,
+      height: DRAFT_NODE_HEIGHT,
+      selectable: true,
+      dragHandle: '.note-drag-handle',
+      data: {
+        kind: 'draft',
+        onSave: (body, label, reverse) => handleSaveDraft(draft, body, label, reverse),
+        onCancel: () => setDraft(null)
+      }
+    })
+  }
+
+  const edges: Edge[] = draft
+    ? [
+        ...layouted.edges,
+        {
+          id: `${draft.clientId}__preview`,
+          source: draft.sourceFilename,
+          target: draft.clientId,
+          type: 'floating',
+          style: { stroke: '#b9a68f', strokeWidth: 1.4, strokeDasharray: '4 4' }
+        }
+      ]
+    : layouted.edges
 
   return (
     <ReactFlow
       fitView
       nodeOrigin={[0.5, 0.5]}
       nodes={nodes}
-      edges={layouted.edges}
+      edges={edges}
+      nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
-      nodesConnectable={false}
+      nodesConnectable
+      onConnectStart={onConnectStart}
+      onConnectEnd={onConnectEnd}
+      connectionLineStyle={{ stroke: '#d36945', strokeWidth: 1.6, strokeDasharray: '4 4' }}
       minZoom={0.14}
       maxZoom={1.5}
       panOnScroll
@@ -147,65 +236,6 @@ function FlowScene({
       />
       <Controls showInteractive={false} />
     </ReactFlow>
-  )
-}
-
-function NoteCard({
-  note,
-  onOpenNote
-}: {
-  note: GraphNodePayload
-  onOpenNote: (filename: string) => void
-}): React.JSX.Element {
-  return (
-    <article
-      className={[
-        'note-card',
-        'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)] transition-transform duration-200',
-        note.direction === 'center' ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
-        note.missing ? 'note-card-missing' : '',
-        'bg-[rgba(255,251,246,0.96)]'
-      ].join(' ')}
-    >
-      <div className="note-drag-handle mb-3 flex cursor-grab justify-end">
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenNote(note.filename)
-          }}
-          title="Center this note"
-        >
-          <Crosshair className="size-3.5" />
-        </button>
-      </div>
-
-      <div className="note-markdown text-[#352921]">
-        {note.body.trim() ? (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              a: ({ href, children }) => (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1"
-                >
-                  {children}
-                  <ExternalLink className="size-3" />
-                </a>
-              )
-            }}
-          >
-            {note.body}
-          </ReactMarkdown>
-        ) : (
-          <p className="italic text-[#8b6f5d]">Empty note</p>
-        )}
-      </div>
-    </article>
   )
 }
 

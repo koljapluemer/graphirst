@@ -1,10 +1,14 @@
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Document } from 'flexsearch'
 import type {
+  ConnectNotesRequest,
+  ConnectNotesResponse,
   CreateNoteRequest,
   CreateNoteResponse,
+  DeleteNoteRequest,
+  DeleteRelationRequest,
   GraphDirection,
   GraphEdgePayload,
   GraphNodePayload,
@@ -17,7 +21,8 @@ import type {
   NotesOpenResponse,
   NotesSearchResponse,
   RawNoteFile,
-  SearchResult
+  SearchResult,
+  UpdateRelationRequest
 } from '../shared/notes'
 
 const DEFAULT_GRAPH_PATH = '/home/brokkoli/Sync/Graph'
@@ -165,12 +170,19 @@ export class NoteStore {
   async createNote(request: CreateNoteRequest): Promise<CreateNoteResponse> {
     await this.ensureIndexed()
 
-    if (!this.notes.has(request.relatedFilename)) {
+    if (request.relatedFilename && !this.notes.has(request.relatedFilename)) {
       throw new Error(`Could not find "${request.relatedFilename}" in ${this.graphPath}.`)
     }
 
     const filename = this.generateFilename()
-    const label = request.label.trim() || 'related'
+
+    if (!request.relatedFilename) {
+      await this.writeNoteFile(filename, { body: request.body, rels: [] })
+      await this.ensureIndexed(true)
+      return { filename }
+    }
+
+    const label = (request.label ?? '').trim() || 'related'
 
     if (request.reverse) {
       await this.writeNoteFile(filename, {
@@ -184,7 +196,61 @@ export class NoteStore {
 
     await this.ensureIndexed(true)
 
-    return { filename }
+    return { filename, label }
+  }
+
+  async deleteNote(request: DeleteNoteRequest): Promise<void> {
+    await this.ensureIndexed()
+
+    if (!this.notes.has(request.filename)) {
+      throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
+    }
+
+    await unlink(join(this.graphPath, request.filename))
+    await this.ensureIndexed(true)
+  }
+
+  async connectNotes(request: ConnectNotesRequest): Promise<ConnectNotesResponse> {
+    await this.ensureIndexed()
+
+    if (!this.notes.has(request.source)) {
+      throw new Error(`Could not find "${request.source}" in ${this.graphPath}.`)
+    }
+    if (!this.notes.has(request.target)) {
+      throw new Error(`Could not find "${request.target}" in ${this.graphPath}.`)
+    }
+
+    const label = request.label.trim() || 'related'
+    await this.appendRelation(request.source, [label, request.target])
+    await this.ensureIndexed(true)
+
+    return { label }
+  }
+
+  async updateRelationLabel(request: UpdateRelationRequest): Promise<void> {
+    await this.mutateRelations(request.source, (rels) => {
+      const index = rels.findIndex(
+        ([label, target]) => label === request.label && target === request.target
+      )
+      if (index === -1) {
+        throw new Error(`Could not find that relationship in "${request.source}".`)
+      }
+      rels[index] = [request.nextLabel.trim() || request.label, request.target]
+    })
+    await this.ensureIndexed(true)
+  }
+
+  async deleteRelation(request: DeleteRelationRequest): Promise<void> {
+    await this.mutateRelations(request.source, (rels) => {
+      const index = rels.findIndex(
+        ([label, target]) => label === request.label && target === request.target
+      )
+      if (index === -1) {
+        throw new Error(`Could not find that relationship in "${request.source}".`)
+      }
+      rels.splice(index, 1)
+    })
+    await this.ensureIndexed(true)
   }
 
   async loadSettings(): Promise<void> {
@@ -687,13 +753,22 @@ export class NoteStore {
     await writeFile(join(this.graphPath, filename), JSON.stringify(data, null, 2), 'utf8')
   }
 
-  /** Appends a relation to an existing note file without disturbing fields this app doesn't otherwise read/write. */
   private async appendRelation(filename: string, relation: NoteRelationTuple): Promise<void> {
+    await this.mutateRelations(filename, (rels) => {
+      rels.push(relation)
+    })
+  }
+
+  /** Reads, mutates, and rewrites a note's `rels` in place, without disturbing fields this app doesn't otherwise read/write. */
+  private async mutateRelations(
+    filename: string,
+    mutate: (rels: NoteRelationTuple[]) => void
+  ): Promise<void> {
     const path = join(this.graphPath, filename)
     const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    const rels = Array.isArray(parsed.rels) ? parsed.rels : []
-    rels.push(relation)
+    const rels: NoteRelationTuple[] = Array.isArray(parsed.rels) ? parsed.rels : []
+    mutate(rels)
     parsed.rels = rels
     await writeFile(path, JSON.stringify(parsed, null, 2), 'utf8')
   }

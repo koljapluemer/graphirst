@@ -2,11 +2,17 @@ import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 export interface DraftNoteCardProps {
+  /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
+  showRelation: boolean
   onSave: (body: string, label: string, reverse: boolean) => Promise<void>
   onCancel: () => void
 }
 
-export default function DraftNoteCard({ onSave, onCancel }: DraftNoteCardProps): React.JSX.Element {
+export default function DraftNoteCard({
+  showRelation,
+  onSave,
+  onCancel
+}: DraftNoteCardProps): React.JSX.Element {
   const [body, setBody] = useState('')
   const [label, setLabel] = useState('')
   const [reverse, setReverse] = useState(false)
@@ -67,26 +73,30 @@ export default function DraftNoteCard({ onSave, onCancel }: DraftNoteCardProps):
         }}
       />
 
-      <label className="nodrag mt-3 block text-xs text-[#6b5143]">
-        <span className="mb-1 block text-[#8b6f5d]">Relation label</span>
-        <input
-          className="w-full rounded-[10px] border border-[#eadbc9] bg-white/70 px-2 py-1.5 text-sm outline-none focus:border-[#d6a17d]"
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-          onKeyDown={(event) => event.stopPropagation()}
-          placeholder="related"
-        />
-      </label>
+      {showRelation ? (
+        <>
+          <label className="nodrag mt-3 block text-xs text-[#6b5143]">
+            <span className="mb-1 block text-[#8b6f5d]">Relation label</span>
+            <input
+              className="w-full rounded-[10px] border border-[#eadbc9] bg-white/70 px-2 py-1.5 text-sm outline-none focus:border-[#d6a17d]"
+              value={label}
+              onChange={(event) => setLabel(event.target.value)}
+              onKeyDown={(event) => event.stopPropagation()}
+              placeholder="related"
+            />
+          </label>
 
-      <label className="nodrag mt-2 flex items-center gap-2 text-xs text-[#6b5143]">
-        <input
-          type="checkbox"
-          className="checkbox checkbox-xs"
-          checked={reverse}
-          onChange={(event) => setReverse(event.target.checked)}
-        />
-        Reverse direction
-      </label>
+          <label className="nodrag mt-2 flex items-center gap-2 text-xs text-[#6b5143]">
+            <input
+              type="checkbox"
+              className="checkbox checkbox-xs"
+              checked={reverse}
+              onChange={(event) => setReverse(event.target.checked)}
+            />
+            Reverse direction
+          </label>
+        </>
+      ) : null}
 
       {error ? <p className="mt-2 text-xs text-[#b3462c]">{error}</p> : null}
 

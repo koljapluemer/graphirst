@@ -83,17 +83,47 @@ export interface NotesOpenResponse {
 }
 
 export interface CreateNoteRequest {
-  /** Filename (with extension) of the existing note the new note is being connected to. */
-  relatedFilename: string
-  /** Relation label. Falls back to a sensible default when blank. */
-  label: string
+  /** Filename (with extension) of the existing note the new note is being connected to. Omit to create a freestanding, unconnected note. */
+  relatedFilename?: string
+  /** Relation label. Falls back to a sensible default when blank. Ignored when relatedFilename is omitted. */
+  label?: string
   /** When false (default): relatedFilename -> newNote. When true: newNote -> relatedFilename. */
-  reverse: boolean
+  reverse?: boolean
   body: string
 }
 
 export interface CreateNoteResponse {
   filename: string
+  /** The relation label actually written to disk, present whenever relatedFilename was given. */
+  label?: string
+}
+
+export interface DeleteNoteRequest {
+  filename: string
+}
+
+export interface ConnectNotesRequest {
+  source: string
+  target: string
+  label: string
+}
+
+export interface ConnectNotesResponse {
+  /** The relation label actually written to disk (falls back to a default when blank). */
+  label: string
+}
+
+export interface UpdateRelationRequest {
+  source: string
+  target: string
+  label: string
+  nextLabel: string
+}
+
+export interface DeleteRelationRequest {
+  source: string
+  target: string
+  label: string
 }
 
 export interface NotesApi {
@@ -103,4 +133,8 @@ export interface NotesApi {
   pickDirectory: () => Promise<NotesBootstrap>
   refresh: () => Promise<NotesBootstrap>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
+  deleteNote: (request: DeleteNoteRequest) => Promise<void>
+  connectNotes: (request: ConnectNotesRequest) => Promise<ConnectNotesResponse>
+  updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
+  deleteRelation: (request: DeleteRelationRequest) => Promise<void>
 }

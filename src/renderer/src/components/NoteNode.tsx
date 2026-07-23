@@ -7,10 +7,12 @@ export type NoteNodeData =
   | {
       kind: 'note'
       note: GraphNodePayload
-      onOpenNote: (filename: string) => void
+      onDelete: (filename: string) => Promise<void>
     }
   | {
       kind: 'draft'
+      /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
+      showRelation: boolean
       onSave: (body: string, label: string, reverse: boolean) => Promise<void>
       onCancel: () => void
     }
@@ -23,13 +25,20 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
   return (
     <>
       {/*
-        A single untyped target handle so React Flow can resolve *some* handle for
-        edges pointing at this node - FloatingEdge recomputes the actual path from
-        the node rect anyway, so its position doesn't matter. Without this, nodes
-        with only source handles (below) can't be an edge target at all, and every
-        edge into them silently fails to render.
+        A single target handle, centered over the whole node and given a generous
+        connectionRadius (see GraphCanvas) so any drop point on the card resolves to
+        it. Two jobs: (1) lets React Flow resolve *some* handle for edges pointing at
+        this node - FloatingEdge recomputes the actual path from the node rect anyway,
+        so the handle's position doesn't matter for rendering, but its absence means
+        edges into a source-only node silently fail to render; (2) makes "drag from
+        one note onto another" reliably detect the drop target via onConnectEnd's
+        connectionState.toNode.
       */}
-      <Handle type="target" position={Position.Top} />
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
+      />
 
       {data.kind === 'note'
         ? CONNECT_HANDLE_POSITIONS.map((position) => (
@@ -44,9 +53,13 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
         : null}
 
       {data.kind === 'note' ? (
-        <NoteCard note={data.note} onOpenNote={data.onOpenNote} />
+        <NoteCard note={data.note} onDelete={data.onDelete} />
       ) : (
-        <DraftNoteCard onSave={data.onSave} onCancel={data.onCancel} />
+        <DraftNoteCard
+          showRelation={data.showRelation}
+          onSave={data.onSave}
+          onCancel={data.onCancel}
+        />
       )}
     </>
   )

@@ -1,15 +1,33 @@
-import { Crosshair, ExternalLink } from 'lucide-react'
+import { ExternalLink, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { GraphNodePayload } from '../../../shared/notes'
 
 export default function NoteCard({
   note,
-  onOpenNote
+  onDelete
 }: {
   note: GraphNodePayload
-  onOpenNote: (filename: string) => void
+  onDelete: (filename: string) => Promise<void>
 }): React.JSX.Element {
+  const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleConfirmDelete = async (): Promise<void> => {
+    setDeleting(true)
+    setError(null)
+
+    try {
+      await onDelete(note.filename)
+    } catch (deleteError) {
+      setError((deleteError as Error).message)
+      setDeleting(false)
+      setConfirming(false)
+    }
+  }
+
   return (
     <article
       className={[
@@ -20,19 +38,43 @@ export default function NoteCard({
         'bg-[rgba(255,251,246,0.96)]'
       ].join(' ')}
     >
-      <div className="note-drag-handle mb-3 flex cursor-grab justify-end">
-        <button
-          type="button"
-          className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
-          onClick={(event) => {
-            event.stopPropagation()
-            onOpenNote(note.filename)
-          }}
-          title="Center this note"
-        >
-          <Crosshair className="size-3.5" />
-        </button>
+      <div className="note-drag-handle mb-3 flex min-h-6 cursor-grab items-center justify-end">
+        {confirming ? (
+          <div className="nodrag flex items-center gap-1.5">
+            <span className="text-xs text-[#8b6f5d]">Delete this note?</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs rounded-full"
+              onClick={() => setConfirming(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-xs rounded-full border-none bg-[#b3462c] text-white hover:bg-[#96391f]"
+              onClick={() => void handleConfirmDelete()}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c]"
+            onClick={(event) => {
+              event.stopPropagation()
+              setConfirming(true)
+            }}
+            title="Delete this note"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )}
       </div>
+
+      {error ? <p className="mb-2 text-xs text-[#b3462c]">{error}</p> : null}
 
       <div className="note-markdown text-[#352921]">
         {note.body.trim() ? (

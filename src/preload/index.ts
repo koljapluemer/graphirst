@@ -8,7 +8,11 @@ const notesApi: NotesApi = {
   openNote: (filename) => ipcRenderer.invoke('notes:open', filename),
   pickDirectory: () => ipcRenderer.invoke('notes:pick-directory'),
   refresh: () => ipcRenderer.invoke('notes:refresh'),
-  createNote: (request) => ipcRenderer.invoke('notes:create', request)
+  createNote: (request) => ipcRenderer.invoke('notes:create', request),
+  deleteNote: (request) => ipcRenderer.invoke('notes:delete', request),
+  connectNotes: (request) => ipcRenderer.invoke('notes:connect', request),
+  updateRelationLabel: (request) => ipcRenderer.invoke('notes:update-relation-label', request),
+  deleteRelation: (request) => ipcRenderer.invoke('notes:delete-relation', request)
 }
 
 const api = {

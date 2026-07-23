@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, FolderOpen, LoaderCircle, RefreshCw, Search, Settings2 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import type { NotesBootstrap, NotesOpenResponse, SearchResult } from '../../shared/notes'
@@ -17,6 +17,7 @@ function App(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const deferredQuery = useDeferredValue(query)
+  const loadRequestRef = useRef(0)
 
   useEffect(() => {
     let ignore = false
@@ -100,6 +101,12 @@ function App(): React.JSX.Element {
   }, [bootstrap?.status, deferredQuery, refreshKey])
 
   async function loadGraph(filename: string, ignore = false): Promise<void> {
+    // Guards against out-of-order responses: if two loadGraph calls overlap (e.g. a
+    // create/connect/delete-triggered refresh racing a user click elsewhere), only the
+    // result of whichever call was made *last* is allowed to land, regardless of which
+    // network response actually resolves first.
+    const requestId = ++loadRequestRef.current
+
     if (!ignore) {
       setGraphLoading(true)
       setActiveFilename(filename)
@@ -108,7 +115,7 @@ function App(): React.JSX.Element {
 
     try {
       const response = await window.api.notes.openNote(filename)
-      if (ignore) {
+      if (ignore || requestId !== loadRequestRef.current) {
         return
       }
 
@@ -116,13 +123,43 @@ function App(): React.JSX.Element {
         setGraphResponse(response)
       })
     } catch (error) {
-      if (!ignore) {
-        setErrorMessage((error as Error).message)
+      if (ignore || requestId !== loadRequestRef.current) {
+        return
       }
+      setErrorMessage((error as Error).message)
     } finally {
-      if (!ignore) {
+      if (!ignore && requestId === loadRequestRef.current) {
         setGraphLoading(false)
       }
+    }
+  }
+
+  /**
+   * Decides what should be shown after a note is deleted. Deliberately kept out of
+   * GraphCanvas (a rendering component) since "what should the user look at next" is
+   * app-level navigation policy, not a graph-rendering concern - and it needs to
+   * exclude `missing` placeholder nodes, which don't correspond to a real file that
+   * can be opened.
+   */
+  function handleNoteDeleted(deletedFilename: string): void {
+    if (!graphResponse) {
+      return
+    }
+
+    if (deletedFilename !== graphResponse.graph.center) {
+      void loadGraph(graphResponse.graph.center)
+      return
+    }
+
+    const fallback = graphResponse.graph.nodes.find(
+      (node) => node.filename !== deletedFilename && !node.missing
+    )
+
+    if (fallback) {
+      void loadGraph(fallback.filename)
+    } else {
+      setGraphResponse(null)
+      setActiveFilename(null)
     }
   }
 
@@ -204,6 +241,7 @@ function App(): React.JSX.Element {
               graph={graphResponse?.graph ?? null}
               loading={graphLoading}
               onOpenNote={loadGraph}
+              onNoteDeleted={handleNoteDeleted}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />

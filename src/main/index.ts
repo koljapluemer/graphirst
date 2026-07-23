@@ -3,7 +3,13 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { NoteStore } from './note-store'
-import type { CreateNoteRequest } from '../shared/notes'
+import type {
+  ConnectNotesRequest,
+  CreateNoteRequest,
+  DeleteNoteRequest,
+  DeleteRelationRequest,
+  UpdateRelationRequest
+} from '../shared/notes'
 
 let noteStore: NoteStore
 
@@ -65,6 +71,22 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:create', async (_event, request: CreateNoteRequest) => {
     return noteStore.createNote(request)
+  })
+
+  ipcMain.handle('notes:delete', async (_event, request: DeleteNoteRequest) => {
+    return noteStore.deleteNote(request)
+  })
+
+  ipcMain.handle('notes:connect', async (_event, request: ConnectNotesRequest) => {
+    return noteStore.connectNotes(request)
+  })
+
+  ipcMain.handle('notes:update-relation-label', async (_event, request: UpdateRelationRequest) => {
+    return noteStore.updateRelationLabel(request)
+  })
+
+  ipcMain.handle('notes:delete-relation', async (_event, request: DeleteRelationRequest) => {
+    return noteStore.deleteRelation(request)
   })
 
   ipcMain.handle('notes:pick-directory', async () => {

@@ -3,7 +3,6 @@ import {
   Background,
   Controls,
   MarkerType,
-  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useNodesInitialized,
@@ -12,15 +11,17 @@ import {
   type OnConnectEnd,
   type OnConnectStart
 } from '@xyflow/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import FloatingEdge from './FloatingEdge'
 import NoteNode, { type NoteFlowNode } from './NoteNode'
+import PendingConnectionEdge from './PendingConnectionEdge'
 import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
-const edgeTypes = { floating: FloatingEdge }
+const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
 const nodeTypes = { note: NoteNode }
 
 const DRAFT_NODE_HEIGHT = 340
+const CONNECTION_RADIUS = 200
 
 const elk = new ELK()
 
@@ -44,6 +45,7 @@ interface GraphCanvasProps {
   graph: NoteGraph | null
   loading: boolean
   onOpenNote: (filename: string) => void
+  onNoteDeleted: (filename: string) => void
 }
 
 interface LayoutedNode {
@@ -58,23 +60,221 @@ interface LayoutedGraph {
   edges: Edge[]
 }
 
-interface DraftNote {
-  clientId: string
-  sourceFilename: string
+interface PinnedNote {
+  note: GraphNodePayload
   position: { x: number; y: number }
+}
+
+/**
+ * A relation the backend may never surface: its graph query only ever walks the
+ * *outgoing/incoming* relations of the center note and its direct neighbors - a note
+ * two hops out from center is a traversal leaf whose own relations are never
+ * examined, no matter how deep MAX_GRAPH_DEPTH allows nodes to be registered. Any
+ * relation we just created client-side is pinned here so it renders regardless of
+ * whether the backend's BFS would ever have found it, and is dropped once the
+ * backend graph includes an edge with the same id.
+ */
+interface PinnedRelation {
+  source: string
+  target: string
+  label: string
+}
+
+/**
+ * What the user is currently doing on the canvas, beyond just looking at it.
+ * A single union (rather than separate booleans/slots per gesture) makes the
+ * mutually-exclusive states structurally mutually exclusive - you can't have a
+ * draft note AND a pending connection open at once, because there is only one
+ * `interaction` value.
+ */
+type Interaction = IdleInteraction | DraftInteraction | ConnectingInteraction
+
+interface IdleInteraction {
+  type: 'idle'
+}
+
+interface DraftInteraction {
+  type: 'draft'
+  clientId: string
+  /** Note this draft will be connected from, or null for a freestanding/unconnected note. */
+  sourceFilename: string | null
+  position: { x: number; y: number }
+}
+
+interface ConnectingInteraction {
+  type: 'connecting'
+  source: string
+  target: string
+}
+
+const IDLE_INTERACTION: Interaction = { type: 'idle' }
+
+interface ViewCallbacks {
+  onDeleteNote: (filename: string) => Promise<void>
+  onSaveDraft: (
+    draft: DraftInteraction,
+    body: string,
+    label: string,
+    reverse: boolean
+  ) => Promise<void>
+  onCancelInteraction: () => void
+  onConfirmConnection: (connecting: ConnectingInteraction, label: string) => Promise<void>
+  onEdgeChanged: () => void
+}
+
+/**
+ * The single place where the server-derived graph, the local cache of
+ * freshly-created freestanding notes, and the current in-progress interaction
+ * are merged into what actually gets handed to <ReactFlow>. Kept as a pure
+ * function of its inputs so this merge logic can be reasoned about (and
+ * tested) independently of React's render cycle.
+ */
+function buildView(
+  layouted: LayoutedGraph,
+  pinnedNotes: Map<string, PinnedNote>,
+  pinnedRelations: Map<string, PinnedRelation>,
+  interaction: Interaction,
+  callbacks: ViewCallbacks
+): { nodes: NoteFlowNode[]; edges: Edge[] } {
+  const nodes: NoteFlowNode[] = layouted.nodes.map((item) => ({
+    id: item.note.filename,
+    type: 'note',
+    position: item.position,
+    width: item.width,
+    height: item.height,
+    selectable: true,
+    dragHandle: '.note-drag-handle',
+    data: {
+      kind: 'note',
+      note: item.note,
+      onDelete: callbacks.onDeleteNote
+    }
+  }))
+
+  const knownFilenames = new Set(nodes.map((node) => node.id))
+
+  for (const [filename, pinned] of pinnedNotes) {
+    // Once the backend graph can reach this note on its own, that copy is authoritative.
+    if (knownFilenames.has(filename)) {
+      continue
+    }
+
+    nodes.push({
+      id: filename,
+      type: 'note',
+      position: pinned.position,
+      width: NODE_WIDTH,
+      height: estimateNodeHeight(pinned.note),
+      selectable: true,
+      dragHandle: '.note-drag-handle',
+      data: {
+        kind: 'note',
+        note: pinned.note,
+        onDelete: callbacks.onDeleteNote
+      }
+    })
+    knownFilenames.add(filename)
+  }
+
+  const rawEdges: Edge[] = [...layouted.edges]
+  const knownEdgeIds = new Set(layouted.edges.map((edge) => edge.id))
+
+  for (const [edgeId, relation] of pinnedRelations) {
+    // Same idea as pinned notes: once the backend's own graph includes this edge,
+    // defer to it instead of drawing a second, parallel copy.
+    if (knownEdgeIds.has(edgeId)) {
+      continue
+    }
+    if (!knownFilenames.has(relation.source) || !knownFilenames.has(relation.target)) {
+      continue
+    }
+
+    rawEdges.push(
+      buildDirectedEdge({
+        id: edgeId,
+        source: relation.source,
+        target: relation.target,
+        label: relation.label,
+        depth: 1,
+        direction: 'outgoing'
+      })
+    )
+  }
+
+  const edges: Edge[] = rawEdges.map((edge) => ({
+    ...edge,
+    data: {
+      ...(edge.data as Record<string, unknown> | undefined),
+      onChanged: callbacks.onEdgeChanged
+    }
+  }))
+
+  if (interaction.type === 'draft') {
+    nodes.push({
+      id: interaction.clientId,
+      type: 'note',
+      position: interaction.position,
+      width: NODE_WIDTH,
+      height: DRAFT_NODE_HEIGHT,
+      selectable: true,
+      dragHandle: '.note-drag-handle',
+      data: {
+        kind: 'draft',
+        showRelation: interaction.sourceFilename !== null,
+        onSave: (body, label, reverse) => callbacks.onSaveDraft(interaction, body, label, reverse),
+        onCancel: callbacks.onCancelInteraction
+      }
+    })
+
+    // The source note may have been deleted while this draft was still open - the
+    // draft card itself still works (it just won't create a relation on save), but
+    // don't draw a preview line to a node that no longer exists.
+    if (interaction.sourceFilename && knownFilenames.has(interaction.sourceFilename)) {
+      edges.push({
+        id: `${interaction.clientId}__preview`,
+        source: interaction.sourceFilename,
+        target: interaction.clientId,
+        type: 'floating',
+        style: { stroke: '#b9a68f', strokeWidth: 1.4, strokeDasharray: '4 4' }
+      })
+    }
+  }
+
+  if (interaction.type === 'connecting') {
+    // Same defensive check: either note may have been deleted while this
+    // confirm-the-label popover was still open.
+    if (knownFilenames.has(interaction.source) && knownFilenames.has(interaction.target)) {
+      edges.push({
+        id: `pending:${interaction.source}->${interaction.target}`,
+        source: interaction.source,
+        target: interaction.target,
+        type: 'pendingConnection',
+        data: {
+          onConfirm: (label: string) => callbacks.onConfirmConnection(interaction, label),
+          onCancel: callbacks.onCancelInteraction
+        }
+      })
+    }
+  }
+
+  return { nodes, edges }
 }
 
 function FlowScene({
   graph,
-  onOpenNote
+  onOpenNote,
+  onNoteDeleted
 }: {
   graph: NoteGraph
   onOpenNote: (filename: string) => void
+  onNoteDeleted: (filename: string) => void
 }): React.JSX.Element {
   const { fitView, screenToFlowPosition } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
   const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [], edges: [] })
-  const [draft, setDraft] = useState<DraftNote | null>(null)
+  const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
+  const [pinnedNotes, setPinnedNotes] = useState<Map<string, PinnedNote>>(new Map())
+  const [pinnedRelations, setPinnedRelations] = useState<Map<string, PinnedRelation>>(new Map())
   const connectingFromRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -122,10 +322,20 @@ function FlowScene({
   }, [])
 
   const onConnectEnd: OnConnectEnd = useCallback(
-    (event) => {
+    (event, connectionState) => {
       const sourceFilename = connectingFromRef.current
       connectingFromRef.current = null
       if (!sourceFilename) {
+        return
+      }
+
+      const targetFilename = connectionState.toNode?.id
+      if (
+        targetFilename &&
+        targetFilename !== sourceFilename &&
+        !targetFilename.startsWith('draft:')
+      ) {
+        setInteraction({ type: 'connecting', source: sourceFilename, target: targetFilename })
         return
       }
 
@@ -134,7 +344,8 @@ function FlowScene({
         return
       }
 
-      setDraft({
+      setInteraction({
+        type: 'draft',
         clientId: `draft:${sourceFilename}:${Date.now()}`,
         sourceFilename,
         position: screenToFlowPosition({ x: point.clientX, y: point.clientY })
@@ -143,66 +354,131 @@ function FlowScene({
     [screenToFlowPosition]
   )
 
+  const handlePaneDoubleClick = useCallback(
+    (event: ReactMouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.classList.contains('react-flow__pane')) {
+        return
+      }
+
+      setInteraction({
+        type: 'draft',
+        clientId: `draft:orphan:${Date.now()}`,
+        sourceFilename: null,
+        position: screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      })
+    },
+    [screenToFlowPosition]
+  )
+
+  const handleCancelInteraction = useCallback(() => {
+    setInteraction(IDLE_INTERACTION)
+  }, [])
+
   const handleSaveDraft = async (
-    current: DraftNote,
+    draft: DraftInteraction,
     body: string,
     label: string,
     reverse: boolean
   ): Promise<void> => {
-    await window.api.notes.createNote({
-      relatedFilename: current.sourceFilename,
+    const response = await window.api.notes.createNote({
+      relatedFilename: draft.sourceFilename ?? undefined,
       label,
       reverse,
       body
     })
-    setDraft(null)
+
+    // Always pin the new note locally rather than trusting the next backend refresh
+    // to include it: the graph query only ever walks relations belonging to the
+    // center and its direct neighbors, so a note connected from a two-hops-out note
+    // would otherwise never appear at all, silently, with no error - see
+    // PinnedRelation above.
+    setPinnedNotes((prev) => {
+      const next = new Map(prev)
+      next.set(response.filename, {
+        position: draft.position,
+        note: {
+          filename: response.filename,
+          body,
+          aliases: [],
+          depth: 1,
+          direction: 'mixed',
+          degree: 0
+        }
+      })
+      return next
+    })
+
+    if (draft.sourceFilename && response.label) {
+      const [relationSource, relationTarget] = reverse
+        ? [response.filename, draft.sourceFilename]
+        : [draft.sourceFilename, response.filename]
+      const edgeId = `${relationSource}__${relationTarget}__${response.label}`
+
+      setPinnedRelations((prev) => {
+        const next = new Map(prev)
+        next.set(edgeId, { source: relationSource, target: relationTarget, label: response.label! })
+        return next
+      })
+    }
+
+    setInteraction(IDLE_INTERACTION)
     onOpenNote(graph.center)
   }
 
-  const nodes: NoteFlowNode[] = layouted.nodes.map((item) => ({
-    id: item.note.filename,
-    type: 'note',
-    position: item.position,
-    width: item.width,
-    height: item.height,
-    selectable: true,
-    dragHandle: '.note-drag-handle',
-    data: {
-      kind: 'note',
-      note: item.note,
-      onOpenNote
-    }
-  }))
+  const handleDeleteNote = async (filename: string): Promise<void> => {
+    await window.api.notes.deleteNote({ filename })
 
-  if (draft) {
-    nodes.push({
-      id: draft.clientId,
-      type: 'note',
-      position: draft.position,
-      width: NODE_WIDTH,
-      height: DRAFT_NODE_HEIGHT,
-      selectable: true,
-      dragHandle: '.note-drag-handle',
-      data: {
-        kind: 'draft',
-        onSave: (body, label, reverse) => handleSaveDraft(draft, body, label, reverse),
-        onCancel: () => setDraft(null)
+    setPinnedNotes((prev) => {
+      if (!prev.has(filename)) {
+        return prev
       }
+      const next = new Map(prev)
+      next.delete(filename)
+      return next
     })
+
+    onNoteDeleted(filename)
   }
 
-  const edges: Edge[] = draft
-    ? [
-        ...layouted.edges,
-        {
-          id: `${draft.clientId}__preview`,
-          source: draft.sourceFilename,
-          target: draft.clientId,
-          type: 'floating',
-          style: { stroke: '#b9a68f', strokeWidth: 1.4, strokeDasharray: '4 4' }
-        }
-      ]
-    : layouted.edges
+  const handleConfirmConnection = async (
+    connecting: ConnectingInteraction,
+    label: string
+  ): Promise<void> => {
+    const response = await window.api.notes.connectNotes({
+      source: connecting.source,
+      target: connecting.target,
+      label
+    })
+
+    // Same reasoning as handleSaveDraft: the backend's graph query may never surface
+    // this relation on its own if either note is two hops out from center.
+    const edgeId = `${connecting.source}__${connecting.target}__${response.label}`
+    setPinnedRelations((prev) => {
+      const next = new Map(prev)
+      next.set(edgeId, {
+        source: connecting.source,
+        target: connecting.target,
+        label: response.label
+      })
+      return next
+    })
+
+    setInteraction(IDLE_INTERACTION)
+    onOpenNote(graph.center)
+  }
+
+  const handleEdgeChanged = useCallback(() => {
+    onOpenNote(graph.center)
+  }, [onOpenNote, graph.center])
+
+  const { nodes, edges } = buildView(layouted, pinnedNotes, pinnedRelations, interaction, {
+    onDeleteNote: handleDeleteNote,
+    onSaveDraft: handleSaveDraft,
+    onCancelInteraction: handleCancelInteraction,
+    onConfirmConnection: handleConfirmConnection,
+    onEdgeChanged: handleEdgeChanged
+  })
 
   return (
     <ReactFlow
@@ -213,8 +489,10 @@ function FlowScene({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodesConnectable
+      connectionRadius={CONNECTION_RADIUS}
       onConnectStart={onConnectStart}
       onConnectEnd={onConnectEnd}
+      onDoubleClick={handlePaneDoubleClick}
       connectionLineStyle={{ stroke: '#d36945', strokeWidth: 1.6, strokeDasharray: '4 4' }}
       minZoom={0.14}
       maxZoom={1.5}
@@ -228,12 +506,6 @@ function FlowScene({
       }}
     >
       <Background gap={28} color="#eadfce" />
-      <MiniMap
-        pannable
-        zoomable
-        maskColor="rgba(243, 236, 227, 0.72)"
-        nodeColor={(node) => (node.id === graph.center ? '#d46541' : '#6e9d9a')}
-      />
       <Controls showInteractive={false} />
     </ReactFlow>
   )
@@ -242,7 +514,8 @@ function FlowScene({
 export default function GraphCanvas({
   graph,
   loading,
-  onOpenNote
+  onOpenNote,
+  onNoteDeleted
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph) {
     return (
@@ -258,7 +531,18 @@ export default function GraphCanvas({
         <div className="pointer-events-none absolute inset-0 z-20 bg-[rgba(255,250,245,0.6)] backdrop-blur-[1px]" />
       ) : null}
       <ReactFlowProvider>
-        <FlowScene graph={graph} onOpenNote={onOpenNote} />
+        {/*
+          Keyed on center: a real navigation should reset all of FlowScene's local UI
+          state (in-progress draft/connection interaction, pinned freestanding notes)
+          rather than trying to reconcile it, so a remount is simpler and cheaper than
+          manual effect-driven resets.
+        */}
+        <FlowScene
+          key={graph.center}
+          graph={graph}
+          onOpenNote={onOpenNote}
+          onNoteDeleted={onNoteDeleted}
+        />
       </ReactFlowProvider>
     </div>
   )
@@ -366,28 +650,17 @@ function buildDirectedEdge(edge: GraphEdgePayload): Edge {
     source: edge.source,
     target: edge.target,
     type: 'floating',
-    label: edge.label,
     markerEnd: {
       type: MarkerType.ArrowClosed,
       width: 16,
       height: 16,
       color
     },
-    labelStyle: {
-      fill: '#6b5143',
-      fontSize: 11,
-      fontWeight: 700
-    },
-    labelBgStyle: {
-      fill: '#fffaf4',
-      fillOpacity: 0.94
-    },
-    labelBgBorderRadius: 999,
-    labelBgPadding: [8, 4],
     style: {
       stroke: color,
       ...edgeVisualWeight(edge)
-    }
+    },
+    data: { relations: [edge] }
   }
 }
 
@@ -407,7 +680,6 @@ function buildReciprocalEdge(
     source: first.source,
     target: first.target,
     type: 'floating',
-    label: `${first.label} | ${second.label}`,
     markerStart: {
       type: MarkerType.ArrowClosed,
       width: 16,
@@ -420,21 +692,11 @@ function buildReciprocalEdge(
       height: 16,
       color
     },
-    labelStyle: {
-      fill: '#6b5143',
-      fontSize: 11,
-      fontWeight: 700
-    },
-    labelBgStyle: {
-      fill: '#fffaf4',
-      fillOpacity: 0.94
-    },
-    labelBgBorderRadius: 999,
-    labelBgPadding: [8, 4],
     style: {
       stroke: color,
       ...edgeVisualWeight(first.depth <= second.depth ? first : second)
-    }
+    },
+    data: { relations: [first, second] }
   }
 }
 

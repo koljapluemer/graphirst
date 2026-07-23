@@ -40,6 +40,11 @@ input {
   padding: 0;
 }
 
+.react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .react-flow__node.selectable.selected .note-card,
 .react-flow__node.selectable:focus .note-card {
   transform: translateY(-4px);
@@ -62,6 +67,8 @@ input {
 
 .note-card {
   width: 370px;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .note-card-center {

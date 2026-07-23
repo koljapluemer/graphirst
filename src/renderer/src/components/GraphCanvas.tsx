@@ -4,7 +4,6 @@ import {
   Controls,
   MarkerType,
   MiniMap,
-  Position,
   ReactFlow,
   ReactFlowProvider,
   useNodesInitialized,
@@ -16,7 +15,10 @@ import { Crosshair, ExternalLink } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import FloatingEdge from './FloatingEdge'
 import type { GraphNodePayload, NoteGraph } from '../../../shared/notes'
+
+const edgeTypes = { floating: FloatingEdge }
 
 const elk = new ELK()
 
@@ -45,8 +47,8 @@ interface GraphCanvasProps {
 interface LayoutedNode {
   note: GraphNodePayload
   position: { x: number; y: number }
-  sourcePosition: Position
-  targetPosition: Position
+  width: number
+  height: number
 }
 
 interface LayoutedGraph {
@@ -108,8 +110,8 @@ function FlowScene({
   const nodes: Node[] = layouted.nodes.map((item) => ({
     id: item.note.filename,
     position: item.position,
-    sourcePosition: item.sourcePosition,
-    targetPosition: item.targetPosition,
+    width: item.width,
+    height: item.height,
     selectable: true,
     dragHandle: '.note-drag-handle',
     data: {
@@ -123,6 +125,8 @@ function FlowScene({
       nodeOrigin={[0.5, 0.5]}
       nodes={nodes}
       edges={layouted.edges}
+      edgeTypes={edgeTypes}
+      nodesConnectable={false}
       minZoom={0.14}
       maxZoom={1.5}
       panOnScroll
@@ -130,7 +134,7 @@ function FlowScene({
       selectionOnDrag
       proOptions={{ hideAttribution: true }}
       defaultEdgeOptions={{
-        type: 'bezier',
+        type: 'floating',
         zIndex: 0
       }}
     >
@@ -275,26 +279,11 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
   const layoutedNodes: LayoutedNode[] = graph.nodes.map((note) => ({
     note,
     position: positions.get(note.filename) ?? { x: 0, y: 0 },
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left
+    width: nodeSizes.get(note.filename)?.width ?? NODE_WIDTH,
+    height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
   }))
 
   const nodeById = new Map(layoutedNodes.map((node) => [node.note.filename, node]))
-
-  for (const node of layoutedNodes) {
-    const outgoingNeighbors = graph.edges
-      .filter((edge) => edge.source === node.note.filename)
-      .map((edge) => nodeById.get(edge.target))
-      .filter((neighbor): neighbor is LayoutedNode => Boolean(neighbor))
-
-    const incomingNeighbors = graph.edges
-      .filter((edge) => edge.target === node.note.filename)
-      .map((edge) => nodeById.get(edge.source))
-      .filter((neighbor): neighbor is LayoutedNode => Boolean(neighbor))
-
-    node.sourcePosition = resolveHandleSide(node.position, outgoingNeighbors, Position.Right)
-    node.targetPosition = resolveHandleSide(node.position, incomingNeighbors, Position.Left)
-  }
 
   const edges: Edge[] = graph.edges
     .filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target))
@@ -302,11 +291,8 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: 'bezier',
+      type: 'floating',
       label: edge.label,
-      pathOptions: {
-        curvature: 0.32
-      },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 16,
@@ -335,30 +321,6 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
     nodes: layoutedNodes,
     edges
   }
-}
-
-function resolveHandleSide(
-  origin: { x: number; y: number },
-  neighbors: LayoutedNode[],
-  fallback: Position
-): Position {
-  if (neighbors.length === 0) {
-    return fallback
-  }
-
-  const vector = neighbors.reduce(
-    (acc, neighbor) => ({
-      x: acc.x + (neighbor.position.x - origin.x),
-      y: acc.y + (neighbor.position.y - origin.y)
-    }),
-    { x: 0, y: 0 }
-  )
-
-  if (Math.abs(vector.x) >= Math.abs(vector.y)) {
-    return vector.x >= 0 ? Position.Right : Position.Left
-  }
-
-  return vector.y >= 0 ? Position.Bottom : Position.Top
 }
 
 function estimateNodeHeight(note: GraphNodePayload): number {

@@ -57,7 +57,6 @@ interface LayoutedNode {
 
 interface LayoutedGraph {
   nodes: LayoutedNode[]
-  edges: Edge[]
 }
 
 interface PinnedNote {
@@ -128,8 +127,18 @@ interface ViewCallbacks {
  * are merged into what actually gets handed to <ReactFlow>. Kept as a pure
  * function of its inputs so this merge logic can be reasoned about (and
  * tested) independently of React's render cycle.
+ *
+ * Edge construction (including reciprocal-pair merging, see
+ * mergeRelationsIntoEdges) happens here, over the combined raw relation list,
+ * rather than being split between a one-off pass over the backend graph and a
+ * separate raw-append pass over pinned relations. Two passes would need two
+ * matching id schemes to reconcile against each other; a pinned relation's raw
+ * id (`source__target__label`) never matches the synthetic id a merged
+ * reciprocal edge gets, so a split pipeline can drop the same relation twice
+ * and never notice the backend has caught up.
  */
 function buildView(
+  graph: NoteGraph,
   layouted: LayoutedGraph,
   pinnedNotes: Map<string, PinnedNote>,
   pinnedRelations: Map<string, PinnedRelation>,
@@ -152,6 +161,7 @@ function buildView(
   }))
 
   const knownFilenames = new Set(nodes.map((node) => node.id))
+  const positions = new Map(layouted.nodes.map((item) => [item.note.filename, item.position]))
 
   for (const [filename, pinned] of pinnedNotes) {
     // Once the backend graph can reach this note on its own, that copy is authoritative.
@@ -174,34 +184,38 @@ function buildView(
       }
     })
     knownFilenames.add(filename)
+    positions.set(filename, pinned.position)
   }
 
-  const rawEdges: Edge[] = [...layouted.edges]
-  const knownEdgeIds = new Set(layouted.edges.map((edge) => edge.id))
+  const relations: GraphEdgePayload[] = graph.edges.filter(
+    (edge) => knownFilenames.has(edge.source) && knownFilenames.has(edge.target)
+  )
+  const knownRelationIds = new Set(relations.map((relation) => relation.id))
 
   for (const [edgeId, relation] of pinnedRelations) {
-    // Same idea as pinned notes: once the backend's own graph includes this edge,
-    // defer to it instead of drawing a second, parallel copy.
-    if (knownEdgeIds.has(edgeId)) {
+    // Same idea as pinned notes: once the backend's own graph includes this relation,
+    // defer to it instead of drawing a second, parallel copy. This is checked against
+    // the *raw* backend relation ids (matching pinnedRelations' own id scheme), not
+    // against post-merge edge ids, so it still recognizes the relation once the
+    // backend catches up even if that relation is now part of a merged reciprocal pair.
+    if (knownRelationIds.has(edgeId)) {
       continue
     }
     if (!knownFilenames.has(relation.source) || !knownFilenames.has(relation.target)) {
       continue
     }
 
-    rawEdges.push(
-      buildDirectedEdge({
-        id: edgeId,
-        source: relation.source,
-        target: relation.target,
-        label: relation.label,
-        depth: 1,
-        direction: 'outgoing'
-      })
-    )
+    relations.push({
+      id: edgeId,
+      source: relation.source,
+      target: relation.target,
+      label: relation.label,
+      depth: 1,
+      direction: 'outgoing'
+    })
   }
 
-  const edges: Edge[] = rawEdges.map((edge) => ({
+  const edges: Edge[] = mergeRelationsIntoEdges(relations, positions).map((edge) => ({
     ...edge,
     data: {
       ...(edge.data as Record<string, unknown> | undefined),
@@ -271,7 +285,7 @@ function FlowScene({
 }): React.JSX.Element {
   const { fitView, screenToFlowPosition } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
-  const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [], edges: [] })
+  const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [] })
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
   const [pinnedNotes, setPinnedNotes] = useState<Map<string, PinnedNote>>(new Map())
   const [pinnedRelations, setPinnedRelations] = useState<Map<string, PinnedRelation>>(new Map())
@@ -315,7 +329,7 @@ function FlowScene({
       cancelAnimationFrame(firstFrame)
       cancelAnimationFrame(secondFrame)
     }
-  }, [fitView, layouted.nodes.length, layouted.edges.length, graph.center, nodesInitialized])
+  }, [fitView, layouted.nodes.length, graph.edges.length, graph.center, nodesInitialized])
 
   const onConnectStart: OnConnectStart = useCallback((_event, { nodeId }) => {
     connectingFromRef.current = nodeId
@@ -472,7 +486,7 @@ function FlowScene({
     onOpenNote(graph.center)
   }, [onOpenNote, graph.center])
 
-  const { nodes, edges } = buildView(layouted, pinnedNotes, pinnedRelations, interaction, {
+  const { nodes, edges } = buildView(graph, layouted, pinnedNotes, pinnedRelations, interaction, {
     onDeleteNote: handleDeleteNote,
     onSaveDraft: handleSaveDraft,
     onCancelInteraction: handleCancelInteraction,
@@ -597,20 +611,32 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
     height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
   }))
 
-  const nodeById = new Map(layoutedNodes.map((node) => [node.note.filename, node]))
+  return {
+    nodes: layoutedNodes
+  }
+}
 
-  const validEdges = graph.edges.filter(
-    (edge) => nodeById.has(edge.source) && nodeById.has(edge.target)
-  )
-
+/**
+ * Groups a flat relation list by unordered node-pair and collapses any
+ * reciprocal pair into a single visual edge (see buildReciprocalEdge) so its
+ * two labels render merged instead of stacked. This is the *only* place that
+ * merging happens - callers must feed it the complete current relation list
+ * (backend-confirmed and still-optimistic alike) rather than merging in
+ * separate passes, since a merged edge's id no longer matches either of its
+ * inputs' raw ids and so can't be reconciled against after the fact.
+ */
+function mergeRelationsIntoEdges(
+  relations: GraphEdgePayload[],
+  positions: Map<string, { x: number; y: number }>
+): Edge[] {
   const pairGroups = new Map<string, GraphEdgePayload[]>()
-  for (const edge of validEdges) {
-    const pairKey = [edge.source, edge.target].sort().join('__')
+  for (const relation of relations) {
+    const pairKey = [relation.source, relation.target].sort().join('__')
     const group = pairGroups.get(pairKey)
     if (group) {
-      group.push(edge)
+      group.push(relation)
     } else {
-      pairGroups.set(pairKey, [edge])
+      pairGroups.set(pairKey, [relation])
     }
   }
 
@@ -619,16 +645,13 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
     if (group.length === 2 && isReciprocalPair(group[0], group[1])) {
       edges.push(buildReciprocalEdge(group[0], group[1], positions))
     } else {
-      for (const edge of group) {
-        edges.push(buildDirectedEdge(edge))
+      for (const relation of group) {
+        edges.push(buildDirectedEdge(relation))
       }
     }
   }
 
-  return {
-    nodes: layoutedNodes,
-    edges
-  }
+  return edges
 }
 
 function isReciprocalPair(a: GraphEdgePayload, b: GraphEdgePayload): boolean {

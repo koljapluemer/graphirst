@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouse
 import FloatingEdge from './FloatingEdge'
 import NoteNode, { type NoteFlowNode } from './NoteNode'
 import PendingConnectionEdge from './PendingConnectionEdge'
+import { CREATED_NOTE_PIN_DEPTH, MANUAL_PIN_DEPTH } from '../hooks/useNoteGraph'
 import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
@@ -44,8 +45,11 @@ const ELK_LAYOUT_OPTIONS = {
 interface GraphCanvasProps {
   graph: NoteGraph | null
   loading: boolean
-  onOpenNote: (filename: string) => void
-  onNoteDeleted: (filename: string) => void
+  pins: ReadonlyMap<string, number>
+  onPinNote: (filename: string, depth: number) => void
+  onUnpinNote: (filename: string) => void
+  onSetPinDepth: (filename: string, depth: number) => void
+  onRefetch: () => void
 }
 
 interface LayoutedNode {
@@ -57,26 +61,6 @@ interface LayoutedNode {
 
 interface LayoutedGraph {
   nodes: LayoutedNode[]
-}
-
-interface PinnedNote {
-  note: GraphNodePayload
-  position: { x: number; y: number }
-}
-
-/**
- * A relation the backend may never surface: its graph query only ever walks the
- * *outgoing/incoming* relations of the center note and its direct neighbors - a note
- * two hops out from center is a traversal leaf whose own relations are never
- * examined, no matter how deep MAX_GRAPH_DEPTH allows nodes to be registered. Any
- * relation we just created client-side is pinned here so it renders regardless of
- * whether the backend's BFS would ever have found it, and is dropped once the
- * backend graph includes an edge with the same id.
- */
-interface PinnedRelation {
-  source: string
-  target: string
-  label: string
 }
 
 /**
@@ -119,29 +103,24 @@ interface ViewCallbacks {
   onCancelInteraction: () => void
   onConfirmConnection: (connecting: ConnectingInteraction, label: string) => Promise<void>
   onEdgeChanged: () => void
+  onPinNote: (filename: string) => void
+  onUnpinNote: (filename: string) => void
+  onChangeDepth: (filename: string, nextDepth: number) => void
 }
 
 /**
- * The single place where the server-derived graph, the local cache of
- * freshly-created freestanding notes, and the current in-progress interaction
- * are merged into what actually gets handed to <ReactFlow>. Kept as a pure
- * function of its inputs so this merge logic can be reasoned about (and
- * tested) independently of React's render cycle.
- *
- * Edge construction (including reciprocal-pair merging, see
- * mergeRelationsIntoEdges) happens here, over the combined raw relation list,
- * rather than being split between a one-off pass over the backend graph and a
- * separate raw-append pass over pinned relations. Two passes would need two
- * matching id schemes to reconcile against each other; a pinned relation's raw
- * id (`source__target__label`) never matches the synthetic id a merged
- * reciprocal edge gets, so a split pipeline can drop the same relation twice
- * and never notice the backend has caught up.
+ * The single place where the server-derived graph, the current pin state, and
+ * the current in-progress interaction are merged into what actually gets
+ * handed to <ReactFlow>. Kept as a pure function of its inputs so this merge
+ * logic can be reasoned about independently of React's render cycle. The
+ * backend graph is authoritative for what notes/relations exist - there is no
+ * client-side patch layer here, since a pinned note is a real BFS root on the
+ * backend rather than an optimistic guess.
  */
 function buildView(
   graph: NoteGraph,
   layouted: LayoutedGraph,
-  pinnedNotes: Map<string, PinnedNote>,
-  pinnedRelations: Map<string, PinnedRelation>,
+  pins: ReadonlyMap<string, number>,
   interaction: Interaction,
   callbacks: ViewCallbacks
 ): { nodes: NoteFlowNode[]; edges: Edge[] } {
@@ -156,64 +135,23 @@ function buildView(
     data: {
       kind: 'note',
       note: item.note,
-      onDelete: callbacks.onDeleteNote
+      pinDepth: pins.get(item.note.filename) ?? null,
+      onDelete: callbacks.onDeleteNote,
+      onPin: callbacks.onPinNote,
+      onUnpin: callbacks.onUnpinNote,
+      onChangeDepth: callbacks.onChangeDepth
     }
   }))
 
   const knownFilenames = new Set(nodes.map((node) => node.id))
   const positions = new Map(layouted.nodes.map((item) => [item.note.filename, item.position]))
 
-  for (const [filename, pinned] of pinnedNotes) {
-    // Once the backend graph can reach this note on its own, that copy is authoritative.
-    if (knownFilenames.has(filename)) {
-      continue
-    }
-
-    nodes.push({
-      id: filename,
-      type: 'note',
-      position: pinned.position,
-      width: NODE_WIDTH,
-      height: estimateNodeHeight(pinned.note),
-      selectable: true,
-      dragHandle: '.note-drag-handle',
-      data: {
-        kind: 'note',
-        note: pinned.note,
-        onDelete: callbacks.onDeleteNote
-      }
-    })
-    knownFilenames.add(filename)
-    positions.set(filename, pinned.position)
-  }
-
+  // An edge can reference a node the backend dropped after hitting its graph-size cap
+  // (the edge is registered before its far endpoint's node-cap check runs) - filter
+  // those out so React Flow never gets an edge pointing at a node it doesn't have.
   const relations: GraphEdgePayload[] = graph.edges.filter(
     (edge) => knownFilenames.has(edge.source) && knownFilenames.has(edge.target)
   )
-  const knownRelationIds = new Set(relations.map((relation) => relation.id))
-
-  for (const [edgeId, relation] of pinnedRelations) {
-    // Same idea as pinned notes: once the backend's own graph includes this relation,
-    // defer to it instead of drawing a second, parallel copy. This is checked against
-    // the *raw* backend relation ids (matching pinnedRelations' own id scheme), not
-    // against post-merge edge ids, so it still recognizes the relation once the
-    // backend catches up even if that relation is now part of a merged reciprocal pair.
-    if (knownRelationIds.has(edgeId)) {
-      continue
-    }
-    if (!knownFilenames.has(relation.source) || !knownFilenames.has(relation.target)) {
-      continue
-    }
-
-    relations.push({
-      id: edgeId,
-      source: relation.source,
-      target: relation.target,
-      label: relation.label,
-      depth: 1,
-      direction: 'outgoing'
-    })
-  }
 
   const edges: Edge[] = mergeRelationsIntoEdges(relations, positions).map((edge) => ({
     ...edge,
@@ -276,28 +214,38 @@ function buildView(
 
 function FlowScene({
   graph,
-  onOpenNote,
-  onNoteDeleted
+  pins,
+  onPinNote,
+  onUnpinNote,
+  onSetPinDepth,
+  onRefetch
 }: {
   graph: NoteGraph
-  onOpenNote: (filename: string) => void
-  onNoteDeleted: (filename: string) => void
+  pins: ReadonlyMap<string, number>
+  onPinNote: (filename: string, depth: number) => void
+  onUnpinNote: (filename: string) => void
+  onSetPinDepth: (filename: string, depth: number) => void
+  onRefetch: () => void
 }): React.JSX.Element {
   const { fitView, screenToFlowPosition } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
   const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [] })
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
-  const [pinnedNotes, setPinnedNotes] = useState<Map<string, PinnedNote>>(new Map())
-  const [pinnedRelations, setPinnedRelations] = useState<Map<string, PinnedRelation>>(new Map())
   const connectingFromRef = useRef<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     const runLayout = async (): Promise<void> => {
-      const nextLayout = await getLayoutedGraph(graph)
-      if (!cancelled) {
-        setLayouted(nextLayout)
+      try {
+        const nextLayout = await getLayoutedGraph(graph)
+        if (!cancelled) {
+          setLayouted(nextLayout)
+        }
+      } catch (error) {
+        // Never let this fail silently: an uncaught rejection here used to leave
+        // `layouted` frozen forever with no visible sign anything had gone wrong.
+        console.error('Failed to lay out graph:', error)
       }
     }
 
@@ -318,7 +266,6 @@ function FlowScene({
       secondFrame = requestAnimationFrame(() => {
         void fitView({
           duration: 420,
-          minZoom: 0.2,
           maxZoom: 1.15,
           padding: { top: 0.16, right: 0.2, bottom: 0.16, left: 0.2 }
         })
@@ -329,7 +276,7 @@ function FlowScene({
       cancelAnimationFrame(firstFrame)
       cancelAnimationFrame(secondFrame)
     }
-  }, [fitView, layouted.nodes.length, graph.edges.length, graph.center, nodesInitialized])
+  }, [fitView, layouted.nodes.length, graph.edges.length, nodesInitialized])
 
   const onConnectStart: OnConnectStart = useCallback((_event, { nodeId }) => {
     connectingFromRef.current = nodeId
@@ -402,96 +349,51 @@ function FlowScene({
       body
     })
 
-    // Always pin the new note locally rather than trusting the next backend refresh
-    // to include it: the graph query only ever walks relations belonging to the
-    // center and its direct neighbors, so a note connected from a two-hops-out note
-    // would otherwise never appear at all, silently, with no error - see
-    // PinnedRelation above.
-    setPinnedNotes((prev) => {
-      const next = new Map(prev)
-      next.set(response.filename, {
-        position: draft.position,
-        note: {
-          filename: response.filename,
-          body,
-          aliases: [],
-          depth: 1,
-          direction: 'mixed',
-          degree: 0
-        }
-      })
-      return next
-    })
-
-    if (draft.sourceFilename && response.label) {
-      const [relationSource, relationTarget] = reverse
-        ? [response.filename, draft.sourceFilename]
-        : [draft.sourceFilename, response.filename]
-      const edgeId = `${relationSource}__${relationTarget}__${response.label}`
-
-      setPinnedRelations((prev) => {
-        const next = new Map(prev)
-        next.set(edgeId, { source: relationSource, target: relationTarget, label: response.label! })
-        return next
-      })
-    }
-
+    // The new note becomes its own BFS root, so its relation to the source renders
+    // correctly even if the source itself is several hops from every other pin.
+    onPinNote(response.filename, CREATED_NOTE_PIN_DEPTH)
     setInteraction(IDLE_INTERACTION)
-    onOpenNote(graph.center)
   }
 
   const handleDeleteNote = async (filename: string): Promise<void> => {
     await window.api.notes.deleteNote({ filename })
-
-    setPinnedNotes((prev) => {
-      if (!prev.has(filename)) {
-        return prev
-      }
-      const next = new Map(prev)
-      next.delete(filename)
-      return next
-    })
-
-    onNoteDeleted(filename)
+    onUnpinNote(filename)
   }
 
   const handleConfirmConnection = async (
     connecting: ConnectingInteraction,
     label: string
   ): Promise<void> => {
-    const response = await window.api.notes.connectNotes({
+    await window.api.notes.connectNotes({
       source: connecting.source,
       target: connecting.target,
       label
     })
 
-    // Same reasoning as handleSaveDraft: the backend's graph query may never surface
-    // this relation on its own if either note is two hops out from center.
-    const edgeId = `${connecting.source}__${connecting.target}__${response.label}`
-    setPinnedRelations((prev) => {
-      const next = new Map(prev)
-      next.set(edgeId, {
-        source: connecting.source,
-        target: connecting.target,
-        label: response.label
-      })
-      return next
-    })
-
     setInteraction(IDLE_INTERACTION)
-    onOpenNote(graph.center)
+    onRefetch()
   }
 
   const handleEdgeChanged = useCallback(() => {
-    onOpenNote(graph.center)
-  }, [onOpenNote, graph.center])
+    onRefetch()
+  }, [onRefetch])
 
-  const { nodes, edges } = buildView(graph, layouted, pinnedNotes, pinnedRelations, interaction, {
+  const handlePinNote = useCallback(
+    (filename: string) => {
+      onPinNote(filename, MANUAL_PIN_DEPTH)
+    },
+    [onPinNote]
+  )
+
+  const { nodes, edges } = buildView(graph, layouted, pins, interaction, {
     onDeleteNote: handleDeleteNote,
     onSaveDraft: handleSaveDraft,
     onCancelInteraction: handleCancelInteraction,
     onConfirmConnection: handleConfirmConnection,
-    onEdgeChanged: handleEdgeChanged
+    onEdgeChanged: handleEdgeChanged,
+    onPinNote: handlePinNote,
+    onUnpinNote: onUnpinNote,
+    onChangeDepth: onSetPinDepth
   })
 
   return (
@@ -507,8 +409,9 @@ function FlowScene({
       onConnectStart={onConnectStart}
       onConnectEnd={onConnectEnd}
       onDoubleClick={handlePaneDoubleClick}
+      zoomOnDoubleClick={false}
       connectionLineStyle={{ stroke: '#d36945', strokeWidth: 1.6, strokeDasharray: '4 4' }}
-      minZoom={0.14}
+      minZoom={0.02}
       maxZoom={1.5}
       panOnScroll
       panOnDrag
@@ -528,13 +431,16 @@ function FlowScene({
 export default function GraphCanvas({
   graph,
   loading,
-  onOpenNote,
-  onNoteDeleted
+  pins,
+  onPinNote,
+  onUnpinNote,
+  onSetPinDepth,
+  onRefetch
 }: GraphCanvasProps): React.JSX.Element {
-  if (!graph) {
+  if (!graph || graph.nodes.length === 0) {
     return (
       <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-[#dfceb9] bg-[rgba(255,251,246,0.72)] text-sm text-[#715748] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
-        Open a note.
+        Search for a note to pin it.
       </div>
     )
   }
@@ -545,17 +451,13 @@ export default function GraphCanvas({
         <div className="pointer-events-none absolute inset-0 z-20 bg-[rgba(255,250,245,0.6)] backdrop-blur-[1px]" />
       ) : null}
       <ReactFlowProvider>
-        {/*
-          Keyed on center: a real navigation should reset all of FlowScene's local UI
-          state (in-progress draft/connection interaction, pinned freestanding notes)
-          rather than trying to reconcile it, so a remount is simpler and cheaper than
-          manual effect-driven resets.
-        */}
         <FlowScene
-          key={graph.center}
           graph={graph}
-          onOpenNote={onOpenNote}
-          onNoteDeleted={onNoteDeleted}
+          pins={pins}
+          onPinNote={onPinNote}
+          onUnpinNote={onUnpinNote}
+          onSetPinDepth={onSetPinDepth}
+          onRefetch={onRefetch}
         />
       </ReactFlowProvider>
     </div>
@@ -573,6 +475,8 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
     ])
   )
 
+  const knownFilenames = new Set(graph.nodes.map((note) => note.filename))
+
   const elkGraph: ElkNode = {
     id: 'root',
     layoutOptions: ELK_LAYOUT_OPTIONS,
@@ -581,25 +485,29 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
       width: nodeSizes.get(note.filename)?.width ?? NODE_WIDTH,
       height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
     })),
-    edges: graph.edges.map((edge): ElkExtendedEdge => ({
-      id: edge.id,
-      sources: [edge.source],
-      targets: [edge.target]
-    }))
+    // ELK throws if an edge references a node id not present in `children` above -
+    // defend against that even though the backend is expected not to send one.
+    edges: graph.edges
+      .filter((edge) => knownFilenames.has(edge.source) && knownFilenames.has(edge.target))
+      .map((edge): ElkExtendedEdge => ({
+        id: edge.id,
+        sources: [edge.source],
+        targets: [edge.target]
+      }))
   }
 
   const layout = await elk.layout(elkGraph)
   const children = layout.children ?? []
-  const centerNode = children.find((node) => node.id === graph.center)
-  const centerOffsetX = (centerNode?.x ?? 0) + (centerNode?.width ?? NODE_WIDTH) / 2
-  const centerOffsetY = (centerNode?.y ?? 0) + (centerNode?.height ?? NODE_MIN_HEIGHT) / 2
 
+  // No single "center" to anchor to with multiple simultaneous pins - use ELK's raw
+  // coordinates directly. fitView (see the effect above) reframes the viewport after
+  // every layout anyway, so the absolute coordinate origin is never visible to the user.
   const positions = new Map(
     children.map((node) => [
       node.id,
       {
-        x: (node.x ?? 0) + (node.width ?? NODE_WIDTH) / 2 - centerOffsetX,
-        y: (node.y ?? 0) + (node.height ?? NODE_MIN_HEIGHT) / 2 - centerOffsetY
+        x: (node.x ?? 0) + (node.width ?? NODE_WIDTH) / 2,
+        y: (node.y ?? 0) + (node.height ?? NODE_MIN_HEIGHT) / 2
       }
     ])
   )

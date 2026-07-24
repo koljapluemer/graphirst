@@ -8,6 +8,7 @@ import type {
   CreateNoteRequest,
   DeleteNoteRequest,
   DeleteRelationRequest,
+  PinSpec,
   UpdateRelationRequest
 } from '../shared/notes'
 
@@ -61,8 +62,8 @@ app.whenReady().then(() => {
     return noteStore.search(query)
   })
 
-  ipcMain.handle('notes:open', async (_event, filename: string) => {
-    return noteStore.openNote(filename)
+  ipcMain.handle('notes:graph', async (_event, pins: PinSpec[]) => {
+    return noteStore.openGraph(pins)
   })
 
   ipcMain.handle('notes:refresh', async () => {

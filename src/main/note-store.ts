@@ -9,7 +9,6 @@ import type {
   CreateNoteResponse,
   DeleteNoteRequest,
   DeleteRelationRequest,
-  GraphDirection,
   GraphEdgePayload,
   GraphNodePayload,
   IndexedNote,
@@ -18,8 +17,9 @@ import type {
   NoteLink,
   NoteRelationTuple,
   NotesBootstrap,
-  NotesOpenResponse,
+  NotesGraphResponse,
   NotesSearchResponse,
+  PinSpec,
   RawNoteFile,
   SearchResult,
   UpdateRelationRequest
@@ -28,14 +28,13 @@ import type {
 const DEFAULT_GRAPH_PATH = '/home/brokkoli/Sync/Graph'
 const SETTINGS_FILE_NAME = 'graphirst-settings.json'
 const MAX_SEARCH_RESULTS = 40
-const MAX_GRAPH_DEPTH = 2
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
 const MAX_GRAPH_NODES = 140
 
 interface StoredSettings {
   graphPath?: string
-  lastOpened?: string
+  pins?: PinSpec[]
 }
 
 interface SearchDocument extends Record<string, string | number> {
@@ -52,20 +51,35 @@ interface IncomingRelation {
 
 interface NodeMeta {
   depth: number
-  lanes: Set<Exclude<GraphDirection, 'center' | 'mixed'>>
   order: number
 }
 
 interface QueueItem {
   filename: string
   depth: number
-  lane: Exclude<GraphDirection, 'center' | 'mixed'>
+  /** The depth budget of the pin that discovered this item - not a global constant. */
+  maxDepth: number
+}
+
+interface RelationDraft {
+  source: string
+  target: string
+  label: string
+  direction: 'incoming' | 'outgoing'
+}
+
+interface GraphBuildContext {
+  nodes: Map<string, NodeMeta>
+  edges: Map<string, GraphEdgePayload>
+  queue: QueueItem[]
+  skippedRelations: number
+  skippedNodes: number
 }
 
 export class NoteStore {
   private readonly settingsPath: string
   private graphPath = DEFAULT_GRAPH_PATH
-  private lastOpened?: string
+  private lastPins: PinSpec[] = []
   private notes = new Map<string, IndexedNote>()
   private reverseRefs = new Map<string, IncomingRelation[]>()
   private searchDocs = new Map<number, SearchDocument>()
@@ -91,7 +105,7 @@ export class NoteStore {
       status: this.status,
       message: this.message,
       stats: this.stats,
-      lastOpened: this.lastOpened
+      pins: this.lastPins
     }
   }
 
@@ -145,25 +159,20 @@ export class NoteStore {
     }
   }
 
-  async openNote(filename: string): Promise<NotesOpenResponse> {
+  async openGraph(pins: PinSpec[]): Promise<NotesGraphResponse> {
     await this.ensureIndexed()
 
     if (!this.stats) {
       throw new Error(this.message ?? 'The note index is not ready yet.')
     }
 
-    const noteExists = this.notes.has(filename)
-    if (!noteExists) {
-      throw new Error(`Could not find "${filename}" in ${this.graphPath}.`)
-    }
-
-    this.lastOpened = filename
+    this.lastPins = pins
     await this.persistSettings()
 
     return {
       graphPath: this.graphPath,
       stats: this.stats,
-      graph: this.buildGraph(filename)
+      graph: this.buildGraph(pins)
     }
   }
 
@@ -262,8 +271,16 @@ export class NoteStore {
         this.graphPath = parsed.graphPath
       }
 
-      if (typeof parsed.lastOpened === 'string' && parsed.lastOpened.trim()) {
-        this.lastOpened = parsed.lastOpened
+      if (Array.isArray(parsed.pins)) {
+        this.lastPins = parsed.pins.filter(
+          (pin): pin is PinSpec =>
+            typeof pin === 'object' &&
+            pin !== null &&
+            typeof pin.filename === 'string' &&
+            pin.filename.trim().length > 0 &&
+            typeof pin.depth === 'number' &&
+            pin.depth >= 0
+        )
       }
     } catch (error) {
       const maybeError = error as NodeJS.ErrnoException
@@ -377,11 +394,6 @@ export class NoteStore {
     this.status = 'ready'
     this.message = undefined
     this.hasIndexed = true
-
-    if (this.lastOpened && !this.notes.has(this.lastOpened)) {
-      this.lastOpened = undefined
-      await this.persistSettings()
-    }
   }
 
   private async readNoteFile(filename: string): Promise<IndexedNote | null> {
@@ -530,155 +542,162 @@ export class NoteStore {
     return `${prefix}${compact.slice(start, end)}${suffix}`
   }
 
-  private buildGraph(centerFilename: string): NoteGraph {
-    const centerNote = this.notes.get(centerFilename)
-    const nodes = new Map<string, NodeMeta>()
-    const edges = new Map<string, GraphEdgePayload>()
-    const queue: QueueItem[] = []
-    const warnings: string[] = []
-    let skippedRelations = 0
-    let skippedNodes = 0
-
-    nodes.set(centerFilename, {
-      depth: 0,
-      lanes: new Set(),
-      order: 0
-    })
-
-    if (!centerNote) {
-      return {
-        center: centerFilename,
-        nodes: [
-          {
-            filename: centerFilename,
-            body: 'Referenced note is missing from the current graph folder.',
-            aliases: [],
-            depth: 0,
-            direction: 'center',
-            degree: 0,
-            missing: true
-          }
-        ],
-        edges: [],
-        truncated: false,
-        warnings: ['The requested note is missing from the current folder.']
-      }
+  /**
+   * Multi-root BFS union: every pin is seeded (root + first-level expansion) before
+   * the shared FIFO queue is drained, so the queue processes strictly in
+   * non-decreasing hop-distance order across *all* pins simultaneously. That means
+   * when MAX_GRAPH_NODES is hit, the nodes dropped are the globally-farthest ones
+   * across the whole pin set, not just the tail of whichever pin was listed last.
+   */
+  private buildGraph(pins: PinSpec[]): NoteGraph {
+    if (pins.length === 0) {
+      return { nodes: [], edges: [], truncated: false, warnings: [] }
     }
 
-    const registerNode = (
-      filename: string,
-      depth: number,
-      lane: Exclude<GraphDirection, 'center' | 'mixed'>
-    ): boolean => {
-      const existing = nodes.get(filename)
-      if (!existing) {
-        if (nodes.size >= MAX_GRAPH_NODES) {
-          skippedNodes += 1
-          return false
-        }
-
-        nodes.set(filename, {
-          depth,
-          lanes: new Set([lane]),
-          order: nodes.size
-        })
-        return true
-      }
-
-      if (depth < existing.depth) {
-        existing.depth = depth
-      }
-
-      existing.lanes.add(lane)
-      return false
+    const context = this.createBuildContext()
+    for (const pin of pins) {
+      this.registerPinRoot(pin, context)
     }
+    this.drainQueue(context)
 
-    const enqueueRelations = (
-      origin: string,
-      lane: Exclude<GraphDirection, 'center' | 'mixed'>,
-      depth: number,
-      relations: Array<Omit<GraphEdgePayload, 'id' | 'depth'>>
-    ): void => {
-      const limit = depth === 0 ? MAX_DIRECT_RELATIONS : MAX_SECONDARY_RELATIONS
-      const visible = relations.slice(0, limit)
-      skippedRelations += Math.max(0, relations.length - visible.length)
+    return this.finalizeGraph(context)
+  }
 
-      for (const relation of visible) {
-        const edgeId = `${relation.source}__${relation.target}__${relation.label}`
-        if (!edges.has(edgeId)) {
-          edges.set(edgeId, {
-            id: edgeId,
-            ...relation,
-            depth: depth + 1
-          })
-        }
+  private createBuildContext(): GraphBuildContext {
+    return { nodes: new Map(), edges: new Map(), queue: [], skippedRelations: 0, skippedNodes: 0 }
+  }
 
-        const neighbor = relation.source === origin ? relation.target : relation.source
-        if (depth + 1 > MAX_GRAPH_DEPTH) {
-          continue
-        }
+  /**
+   * A pin is always registered at depth 0, overwriting any prior (deeper) discovery
+   * of the same filename by an earlier pin or by BFS - being a root always wins over
+   * being a mere neighbor. Its relation expansion is unconditional, mirroring how the
+   * old single-center code always fetched the center's direct relations regardless of
+   * anything already queued.
+   */
+  private registerPinRoot(pin: PinSpec, context: GraphBuildContext): void {
+    const existing = context.nodes.get(pin.filename)
+    context.nodes.set(pin.filename, { depth: 0, order: existing?.order ?? context.nodes.size })
 
-        const isNew = registerNode(neighbor, depth + 1, lane)
-        if (isNew && depth + 1 < MAX_GRAPH_DEPTH) {
-          queue.push({
-            filename: neighbor,
-            depth: depth + 1,
-            lane
-          })
-        }
-      }
+    if (pin.depth > 0) {
+      this.expandRelationsAt(pin.filename, 0, pin.depth, context)
     }
+  }
 
-    const directOutgoing = this.getOutgoing(centerFilename).map((rel) => ({
-      source: centerFilename,
+  /** Fetches and registers both relation directions for one note in one place. */
+  private expandRelationsAt(
+    filename: string,
+    depth: number,
+    maxDepth: number,
+    context: GraphBuildContext
+  ): void {
+    this.registerRelations(
+      filename,
+      depth,
+      maxDepth,
+      this.buildOutgoingRelations(filename),
+      context
+    )
+    this.registerRelations(
+      filename,
+      depth,
+      maxDepth,
+      this.buildIncomingRelations(filename),
+      context
+    )
+  }
+
+  private buildOutgoingRelations(filename: string): RelationDraft[] {
+    return this.getOutgoing(filename).map((rel) => ({
+      source: filename,
       target: rel.target,
       label: rel.label,
       direction: 'outgoing' as const
     }))
-    const directIncoming = this.getIncoming(centerFilename).map((rel) => ({
+  }
+
+  private buildIncomingRelations(filename: string): RelationDraft[] {
+    return this.getIncoming(filename).map((rel) => ({
       source: rel.source,
-      target: centerFilename,
+      target: filename,
       label: rel.label,
       direction: 'incoming' as const
     }))
+  }
 
-    enqueueRelations(centerFilename, 'outgoing', 0, directOutgoing)
-    enqueueRelations(centerFilename, 'incoming', 0, directIncoming)
+  /** Caps and registers a relation batch, bounded by the discovering pin's own maxDepth. */
+  private registerRelations(
+    origin: string,
+    depth: number,
+    maxDepth: number,
+    relations: RelationDraft[],
+    context: GraphBuildContext
+  ): void {
+    const limit = depth === 0 ? MAX_DIRECT_RELATIONS : MAX_SECONDARY_RELATIONS
+    const visible = relations.slice(0, limit)
+    context.skippedRelations += Math.max(0, relations.length - visible.length)
 
-    while (queue.length > 0) {
-      const current = queue.shift()
-      if (!current) {
+    for (const relation of visible) {
+      const edgeId = `${relation.source}__${relation.target}__${relation.label}`
+      if (!context.edges.has(edgeId)) {
+        context.edges.set(edgeId, { id: edgeId, ...relation, depth: depth + 1 })
+      }
+
+      const neighbor = relation.source === origin ? relation.target : relation.source
+      if (depth + 1 > maxDepth) {
         continue
       }
 
-      const outgoing = this.getOutgoing(current.filename).map((rel) => ({
-        source: current.filename,
-        target: rel.target,
-        label: rel.label,
-        direction: 'outgoing' as const
-      }))
-      const incoming = this.getIncoming(current.filename).map((rel) => ({
-        source: rel.source,
-        target: current.filename,
-        label: rel.label,
-        direction: 'incoming' as const
-      }))
+      const isNew = this.registerNode(neighbor, depth + 1, context)
+      if (isNew) {
+        // Queue even a node sitting exactly at the depth budget: its own relations
+        // still need to be examined so edges to other already-known nodes are found,
+        // even though no *new* node will be discovered past it (the depth+1 > maxDepth
+        // check above already prevents that on the next pass).
+        context.queue.push({ filename: neighbor, depth: depth + 1, maxDepth })
+      }
+    }
+  }
 
-      enqueueRelations(current.filename, current.lane, current.depth, outgoing)
-      enqueueRelations(current.filename, current.lane, current.depth, incoming)
+  private registerNode(filename: string, depth: number, context: GraphBuildContext): boolean {
+    const existing = context.nodes.get(filename)
+    if (!existing) {
+      if (context.nodes.size >= MAX_GRAPH_NODES) {
+        context.skippedNodes += 1
+        return false
+      }
+
+      context.nodes.set(filename, { depth, order: context.nodes.size })
+      return true
     }
 
-    if (skippedRelations > 0) {
-      warnings.push(`Truncated ${skippedRelations} relationships to keep the graph responsive.`)
+    if (depth < existing.depth) {
+      existing.depth = depth
     }
+    return false
+  }
 
-    if (skippedNodes > 0) {
-      warnings.push(`Skipped ${skippedNodes} additional notes after hitting the graph size cap.`)
+  private drainQueue(context: GraphBuildContext): void {
+    let current: QueueItem | undefined
+    while ((current = context.queue.shift())) {
+      this.expandRelationsAt(current.filename, current.depth, current.maxDepth, context)
+    }
+  }
+
+  private finalizeGraph(context: GraphBuildContext): NoteGraph {
+    const warnings: string[] = []
+    if (context.skippedRelations > 0) {
+      warnings.push(
+        `Truncated ${context.skippedRelations} relationships to keep the graph responsive.`
+      )
+    }
+    if (context.skippedNodes > 0) {
+      warnings.push(
+        `Skipped ${context.skippedNodes} additional notes after hitting the graph size cap.`
+      )
     }
 
     return {
-      center: centerFilename,
-      nodes: Array.from(nodes.entries())
+      nodes: Array.from(context.nodes.entries())
         .map(([filename, meta]) => this.buildGraphNode(filename, meta))
         .sort(
           (left, right) =>
@@ -686,7 +705,13 @@ export class NoteStore {
             right.degree - left.degree ||
             left.filename.localeCompare(right.filename)
         ),
-      edges: Array.from(edges.values()),
+      // An edge can be discovered pointing at a note that never made it into the node
+      // set (e.g. it's past a pin's depth budget) - drop those here rather than
+      // shipping a dangling reference: the renderer's ELK layout has no tolerance for
+      // an edge whose endpoint isn't in its node list and throws on it.
+      edges: Array.from(context.edges.values()).filter(
+        (edge) => context.nodes.has(edge.source) && context.nodes.has(edge.target)
+      ),
       truncated: warnings.length > 0,
       warnings
     }
@@ -694,21 +719,14 @@ export class NoteStore {
 
   private buildGraphNode(filename: string, meta: NodeMeta): GraphNodePayload {
     const note = this.notes.get(filename)
-    const missing = !note
-
-    let direction: GraphDirection = 'center'
-    if (meta.depth > 0) {
-      direction = meta.lanes.size > 1 ? 'mixed' : (Array.from(meta.lanes)[0] ?? 'mixed')
-    }
 
     return {
       filename,
       body: note?.body ?? 'Referenced note is missing from the current graph folder.',
       aliases: note?.aliases ?? [],
       depth: meta.depth,
-      direction,
       degree: note?.degree ?? 0,
-      missing
+      missing: !note
     }
   }
 
@@ -781,7 +799,7 @@ export class NoteStore {
       JSON.stringify(
         {
           graphPath: this.graphPath,
-          lastOpened: this.lastOpened
+          pins: this.lastPins
         } satisfies StoredSettings,
         null,
         2

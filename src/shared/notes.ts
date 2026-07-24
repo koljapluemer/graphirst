@@ -19,14 +19,17 @@ export interface IndexedNote {
   degree: number
 }
 
-export type GraphDirection = 'center' | 'incoming' | 'outgoing' | 'mixed'
+export interface PinSpec {
+  filename: string
+  depth: number
+}
 
 export interface GraphNodePayload {
   filename: string
   body: string
   aliases: string[]
+  /** Hops from the nearest pin that discovered this node. Informational only. */
   depth: number
-  direction: GraphDirection
   degree: number
   missing?: boolean
 }
@@ -41,7 +44,6 @@ export interface GraphEdgePayload {
 }
 
 export interface NoteGraph {
-  center: string
   nodes: GraphNodePayload[]
   edges: GraphEdgePayload[]
   truncated: boolean
@@ -67,7 +69,7 @@ export interface NotesBootstrap {
   status: 'ready' | 'missing-directory' | 'empty' | 'error'
   message?: string
   stats: IndexStats | null
-  lastOpened?: string
+  pins?: PinSpec[]
 }
 
 export interface NotesSearchResponse {
@@ -76,7 +78,7 @@ export interface NotesSearchResponse {
   results: SearchResult[]
 }
 
-export interface NotesOpenResponse {
+export interface NotesGraphResponse {
   graphPath: string
   stats: IndexStats
   graph: NoteGraph
@@ -129,7 +131,7 @@ export interface DeleteRelationRequest {
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
   search: (query: string) => Promise<NotesSearchResponse>
-  openNote: (filename: string) => Promise<NotesOpenResponse>
+  openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>
   refresh: () => Promise<NotesBootstrap>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>

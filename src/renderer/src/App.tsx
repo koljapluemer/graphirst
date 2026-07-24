@@ -1,23 +1,31 @@
-import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useState } from 'react'
 import { AlertTriangle, FolderOpen, LoaderCircle, RefreshCw, Search, Settings2 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
-import type { NotesBootstrap, NotesOpenResponse, SearchResult } from '../../shared/notes'
+import { SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
+import type { NotesBootstrap, SearchResult } from '../../shared/notes'
 
 function App(): React.JSX.Element {
   const [bootstrap, setBootstrap] = useState<NotesBootstrap | null>(null)
-  const [graphResponse, setGraphResponse] = useState<NotesOpenResponse | null>(null)
-  const [activeFilename, setActiveFilename] = useState<string | null>(null)
+  const {
+    graph,
+    pins,
+    loading: graphLoading,
+    error: graphError,
+    pinNote,
+    unpinNote,
+    setPinDepth,
+    clearPins,
+    refetch
+  } = useNoteGraph()
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [bootLoading, setBootLoading] = useState(true)
   const [searchLoading, setSearchLoading] = useState(false)
-  const [graphLoading, setGraphLoading] = useState(false)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const deferredQuery = useDeferredValue(query)
-  const loadRequestRef = useRef(0)
 
   useEffect(() => {
     let ignore = false
@@ -32,11 +40,10 @@ function App(): React.JSX.Element {
         setBootstrap(state)
         setErrorMessage(null)
 
-        if (state.status === 'ready' && state.lastOpened) {
-          await loadGraph(state.lastOpened, ignore)
-        } else if (state.status !== 'ready') {
-          setGraphResponse(null)
-          setActiveFilename(null)
+        if (state.status === 'ready') {
+          for (const pin of state.pins ?? []) {
+            pinNote(pin.filename, pin.depth)
+          }
         }
       } catch (error) {
         if (!ignore) {
@@ -54,7 +61,10 @@ function App(): React.JSX.Element {
     return () => {
       ignore = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const displayedError = errorMessage ?? graphError
 
   useEffect(() => {
     let ignore = false
@@ -100,69 +110,6 @@ function App(): React.JSX.Element {
     }
   }, [bootstrap?.status, deferredQuery, refreshKey])
 
-  async function loadGraph(filename: string, ignore = false): Promise<void> {
-    // Guards against out-of-order responses: if two loadGraph calls overlap (e.g. a
-    // create/connect/delete-triggered refresh racing a user click elsewhere), only the
-    // result of whichever call was made *last* is allowed to land, regardless of which
-    // network response actually resolves first.
-    const requestId = ++loadRequestRef.current
-
-    if (!ignore) {
-      setGraphLoading(true)
-      setActiveFilename(filename)
-      setErrorMessage(null)
-    }
-
-    try {
-      const response = await window.api.notes.openNote(filename)
-      if (ignore || requestId !== loadRequestRef.current) {
-        return
-      }
-
-      startTransition(() => {
-        setGraphResponse(response)
-      })
-    } catch (error) {
-      if (ignore || requestId !== loadRequestRef.current) {
-        return
-      }
-      setErrorMessage((error as Error).message)
-    } finally {
-      if (!ignore && requestId === loadRequestRef.current) {
-        setGraphLoading(false)
-      }
-    }
-  }
-
-  /**
-   * Decides what should be shown after a note is deleted. Deliberately kept out of
-   * GraphCanvas (a rendering component) since "what should the user look at next" is
-   * app-level navigation policy, not a graph-rendering concern - and it needs to
-   * exclude `missing` placeholder nodes, which don't correspond to a real file that
-   * can be opened.
-   */
-  function handleNoteDeleted(deletedFilename: string): void {
-    if (!graphResponse) {
-      return
-    }
-
-    if (deletedFilename !== graphResponse.graph.center) {
-      void loadGraph(graphResponse.graph.center)
-      return
-    }
-
-    const fallback = graphResponse.graph.nodes.find(
-      (node) => node.filename !== deletedFilename && !node.missing
-    )
-
-    if (fallback) {
-      void loadGraph(fallback.filename)
-    } else {
-      setGraphResponse(null)
-      setActiveFilename(null)
-    }
-  }
-
   const handleRefresh = async (): Promise<void> => {
     setSettingsBusy(true)
     try {
@@ -171,11 +118,10 @@ function App(): React.JSX.Element {
       setRefreshKey((value) => value + 1)
       setErrorMessage(null)
 
-      if (state.status === 'ready' && activeFilename) {
-        await loadGraph(activeFilename)
-      } else if (state.status !== 'ready') {
-        setGraphResponse(null)
-        setActiveFilename(null)
+      if (state.status === 'ready') {
+        refetch()
+      } else {
+        clearPins()
       }
     } catch (error) {
       setErrorMessage((error as Error).message)
@@ -185,6 +131,7 @@ function App(): React.JSX.Element {
   }
 
   const handlePickDirectory = async (): Promise<void> => {
+    const previousGraphPath = bootstrap?.graphPath
     setSettingsBusy(true)
     try {
       const state = await window.api.notes.pickDirectory()
@@ -192,11 +139,10 @@ function App(): React.JSX.Element {
       setRefreshKey((value) => value + 1)
       setErrorMessage(null)
 
-      if (state.status === 'ready' && state.lastOpened) {
-        await loadGraph(state.lastOpened)
-      } else {
-        setGraphResponse(null)
-        setActiveFilename(null)
+      // Only clear pins if the folder actually changed - the picker returns the
+      // unchanged bootstrap state when the user cancels the dialog.
+      if (state.graphPath !== previousGraphPath) {
+        clearPins()
       }
     } catch (error) {
       setErrorMessage((error as Error).message)
@@ -229,19 +175,22 @@ function App(): React.JSX.Element {
             <Settings2 className="size-4" />
           </button>
 
-          {errorMessage ? (
+          {displayedError ? (
             <div className="absolute left-4 top-4 z-20 flex max-w-md items-start gap-3 rounded-[20px] border border-[#edcdbf] bg-[#fff4ee] px-4 py-3 text-sm text-[#7c4c33] shadow-lg">
               <AlertTriangle className="mt-0.5 size-4.5 shrink-0" />
-              <p>{errorMessage}</p>
+              <p>{displayedError}</p>
             </div>
           ) : null}
 
           {bootstrap?.status === 'ready' ? (
             <GraphCanvas
-              graph={graphResponse?.graph ?? null}
+              graph={graph}
               loading={graphLoading}
-              onOpenNote={loadGraph}
-              onNoteDeleted={handleNoteDeleted}
+              pins={pins}
+              onPinNote={pinNote}
+              onUnpinNote={unpinNote}
+              onSetPinDepth={setPinDepth}
+              onRefetch={refetch}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />
@@ -257,7 +206,7 @@ function App(): React.JSX.Element {
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && results[0]) {
-                    void loadGraph(results[0].filename)
+                    pinNote(results[0].filename, SEARCH_RESULT_PIN_DEPTH)
                   }
                 }}
                 placeholder="Search body or aliases…"
@@ -292,7 +241,7 @@ function App(): React.JSX.Element {
 
             <div className="space-y-2">
               {results.map((result) => {
-                const isActive = result.filename === activeFilename
+                const isActive = pins.has(result.filename)
                 return (
                   <button
                     key={result.filename}
@@ -303,7 +252,7 @@ function App(): React.JSX.Element {
                         ? 'border-[#da8760] bg-[#fff1e4]'
                         : 'border-transparent bg-[rgba(252,248,242,0.82)] hover:border-[#e8d7c8] hover:bg-white'
                     ].join(' ')}
-                    onClick={() => void loadGraph(result.filename)}
+                    onClick={() => pinNote(result.filename, SEARCH_RESULT_PIN_DEPTH)}
                   >
                     <p className="line-clamp-4 text-xs leading-5 text-[#2f2219]">
                       {result.preview}

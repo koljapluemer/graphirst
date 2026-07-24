@@ -2,14 +2,23 @@ import { ExternalLink, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import PinControl from './PinControl'
 import type { GraphNodePayload } from '../../../shared/notes'
 
 export default function NoteCard({
   note,
-  onDelete
+  pinDepth,
+  onDelete,
+  onPin,
+  onUnpin,
+  onChangeDepth
 }: {
   note: GraphNodePayload
+  pinDepth: number | null
   onDelete: (filename: string) => Promise<void>
+  onPin: (filename: string) => void
+  onUnpin: (filename: string) => void
+  onChangeDepth: (filename: string, nextDepth: number) => void
 }): React.JSX.Element {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -33,12 +42,18 @@ export default function NoteCard({
       className={[
         'note-card',
         'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)] transition-transform duration-200',
-        note.direction === 'center' ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
+        pinDepth !== null ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
         note.missing ? 'note-card-missing' : '',
         'bg-[rgba(255,251,246,0.96)]'
       ].join(' ')}
     >
-      <div className="note-drag-handle mb-3 flex min-h-6 cursor-grab items-center justify-end">
+      <div className="note-drag-handle mb-3 flex min-h-6 cursor-grab items-center justify-between">
+        <PinControl
+          pinDepth={pinDepth}
+          onPin={() => onPin(note.filename)}
+          onUnpin={() => onUnpin(note.filename)}
+          onChangeDepth={(next) => onChangeDepth(note.filename, next)}
+        />
         {confirming ? (
           <div className="nodrag flex items-center gap-1.5">
             <span className="text-xs text-[#8b6f5d]">Delete this note?</span>

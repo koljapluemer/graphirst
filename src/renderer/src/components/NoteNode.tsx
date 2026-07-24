@@ -7,7 +7,12 @@ export type NoteNodeData =
   | {
       kind: 'note'
       note: GraphNodePayload
+      /** How many hops of relations to render from this note, or null if it isn't pinned. */
+      pinDepth: number | null
       onDelete: (filename: string) => Promise<void>
+      onPin: (filename: string) => void
+      onUnpin: (filename: string) => void
+      onChangeDepth: (filename: string, nextDepth: number) => void
     }
   | {
       kind: 'draft'
@@ -53,7 +58,14 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
         : null}
 
       {data.kind === 'note' ? (
-        <NoteCard note={data.note} onDelete={data.onDelete} />
+        <NoteCard
+          note={data.note}
+          pinDepth={data.pinDepth}
+          onDelete={data.onDelete}
+          onPin={data.onPin}
+          onUnpin={data.onUnpin}
+          onChangeDepth={data.onChangeDepth}
+        />
       ) : (
         <DraftNoteCard
           showRelation={data.showRelation}

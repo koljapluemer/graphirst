@@ -64,8 +64,7 @@ export default function DraftNoteCard({
 
       <textarea
         ref={textareaRef}
-        className="nodrag nowheel w-full resize-none rounded-[14px] border border-[#eadbc9] bg-white/70 px-3 py-2 text-sm leading-6 text-[#352921] outline-none focus:border-[#d6a17d]"
-        rows={6}
+        className="note-textarea nodrag nowheel w-full resize-none rounded-[14px] border border-[#eadbc9] bg-white/70 px-3 py-2 text-sm leading-6 text-[#352921] outline-none focus:border-[#d6a17d]"
         placeholder="Write the note…"
         value={body}
         onChange={(event) => setBody(event.target.value)}

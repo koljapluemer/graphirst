@@ -28,8 +28,11 @@ import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../sha
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
 const nodeTypes = { note: NoteNode }
 
-const DRAFT_NODE_HEIGHT = 340
 const CONNECTION_RADIUS = 200
+// Draft/edit cards can grow past a neighbor's estimated layout slot while their
+// content changes - keep them above everything else instead of trying to keep
+// the layout from ever overlapping them.
+const EDITING_NODE_Z_INDEX = 1000
 
 const elk = new ELK()
 
@@ -144,12 +147,16 @@ function buildView(
   callbacks: ViewCallbacks
 ): { nodes: NoteFlowNode[]; edges: Edge[] } {
   const nodes: NoteFlowNode[] = layouted.nodes.map((item) => {
+    // No `height` here - the card sizes to its own content (see .note-card in
+    // main.css) and React Flow measures the real rendered height via its
+    // internal ResizeObserver instead of us forcing a layout-time estimate onto
+    // the DOM. `item.height` remains the estimate ELK used to space this node's
+    // layout slot; it's unrelated to what the node actually renders at now.
     const shared = {
       id: item.note.filename,
       type: 'note' as const,
       position: item.position,
       width: item.width,
-      height: item.height,
       selectable: true,
       dragHandle: '.note-drag-handle'
     }
@@ -157,6 +164,7 @@ function buildView(
     if (interaction.type === 'edit' && interaction.filename === item.note.filename) {
       return {
         ...shared,
+        zIndex: EDITING_NODE_Z_INDEX,
         data: {
           kind: 'edit',
           initialBody: item.note.body,
@@ -205,9 +213,9 @@ function buildView(
       type: 'note',
       position: interaction.position,
       width: NODE_WIDTH,
-      height: DRAFT_NODE_HEIGHT,
       selectable: true,
       dragHandle: '.note-drag-handle',
+      zIndex: EDITING_NODE_Z_INDEX,
       data: {
         kind: 'draft',
         showRelation: interaction.sourceFilename !== null,

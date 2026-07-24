@@ -86,8 +86,14 @@ input {
 
 .note-card {
   width: 370px;
-  height: 100%;
-  overflow-y: auto;
+}
+
+/* Lets the edit/draft textarea grow with its content instead of scrolling
+   internally - see field-sizing docs (Chromium-only, fine since this only
+   ever runs inside Electron's bundled Chromium). */
+.note-textarea {
+  field-sizing: content;
+  min-height: 9rem;
 }
 
 .note-card-center {

@@ -11,7 +11,14 @@ import {
   type OnConnectEnd,
   type OnConnectStart
 } from '@xyflow/react'
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent
+} from 'react'
 import FloatingEdge from './FloatingEdge'
 import NoteNode, { type NoteFlowNode } from './NoteNode'
 import PendingConnectionEdge from './PendingConnectionEdge'
@@ -362,53 +369,62 @@ function FlowScene({
     setInteraction(IDLE_INTERACTION)
   }, [])
 
-  const handleSaveDraft = async (
-    draft: DraftInteraction,
-    body: string,
-    label: string,
-    reverse: boolean
-  ): Promise<void> => {
-    const response = await window.api.notes.createNote({
-      relatedFilename: draft.sourceFilename ?? undefined,
-      label,
-      reverse,
-      body
-    })
+  const handleSaveDraft = useCallback(
+    async (
+      draft: DraftInteraction,
+      body: string,
+      label: string,
+      reverse: boolean
+    ): Promise<void> => {
+      const response = await window.api.notes.createNote({
+        relatedFilename: draft.sourceFilename ?? undefined,
+        label,
+        reverse,
+        body
+      })
 
-    // The new note becomes its own BFS root, so its relation to the source renders
-    // correctly even if the source itself is several hops from every other pin.
-    onPinNote(response.filename, CREATED_NOTE_PIN_DEPTH)
-    setInteraction(IDLE_INTERACTION)
-  }
+      // The new note becomes its own BFS root, so its relation to the source renders
+      // correctly even if the source itself is several hops from every other pin.
+      onPinNote(response.filename, CREATED_NOTE_PIN_DEPTH)
+      setInteraction(IDLE_INTERACTION)
+    },
+    [onPinNote]
+  )
 
-  const handleDeleteNote = async (filename: string): Promise<void> => {
-    await window.api.notes.deleteNote({ filename })
-    onUnpinNote(filename)
-  }
+  const handleDeleteNote = useCallback(
+    async (filename: string): Promise<void> => {
+      await window.api.notes.deleteNote({ filename })
+      onUnpinNote(filename)
+    },
+    [onUnpinNote]
+  )
 
   const handleStartEdit = useCallback((filename: string) => {
     setInteraction({ type: 'edit', filename })
   }, [])
 
-  const handleSaveEdit = async (filename: string, body: string): Promise<void> => {
-    await window.api.notes.updateNote({ filename, body })
-    setInteraction(IDLE_INTERACTION)
-    onRefetch()
-  }
+  const handleSaveEdit = useCallback(
+    async (filename: string, body: string): Promise<void> => {
+      await window.api.notes.updateNote({ filename, body })
+      setInteraction(IDLE_INTERACTION)
+      onRefetch()
+    },
+    [onRefetch]
+  )
 
-  const handleConfirmConnection = async (
-    connecting: ConnectingInteraction,
-    label: string
-  ): Promise<void> => {
-    await window.api.notes.connectNotes({
-      source: connecting.source,
-      target: connecting.target,
-      label
-    })
+  const handleConfirmConnection = useCallback(
+    async (connecting: ConnectingInteraction, label: string): Promise<void> => {
+      await window.api.notes.connectNotes({
+        source: connecting.source,
+        target: connecting.target,
+        label
+      })
 
-    setInteraction(IDLE_INTERACTION)
-    onRefetch()
-  }
+      setInteraction(IDLE_INTERACTION)
+      onRefetch()
+    },
+    [onRefetch]
+  )
 
   const handleEdgeChanged = useCallback(() => {
     onRefetch()
@@ -421,18 +437,44 @@ function FlowScene({
     [onPinNote]
   )
 
-  const { nodes, edges } = buildView(graph, layouted, pins, interaction, {
-    onDeleteNote: handleDeleteNote,
-    onStartEdit: handleStartEdit,
-    onSaveEdit: handleSaveEdit,
-    onSaveDraft: handleSaveDraft,
-    onCancelInteraction: handleCancelInteraction,
-    onConfirmConnection: handleConfirmConnection,
-    onEdgeChanged: handleEdgeChanged,
-    onPinNote: handlePinNote,
-    onUnpinNote: onUnpinNote,
-    onChangeDepth: onSetPinDepth
-  })
+  // Memoized so the node/edge objects handed to <ReactFlow> keep referential identity
+  // across renders that don't actually change the view - React Flow's adoptUserNodes
+  // only preserves a node's measured DOM size across renders when the node object
+  // reference is unchanged (see @xyflow/system's checkEquality gate). Rebuilding this
+  // from scratch on every render - e.g. on unrelated App-level state changes like the
+  // search query - was resetting every node's measured size and dropping edges whose
+  // ResizeObserver hadn't fired again yet.
+  const { nodes, edges } = useMemo(
+    () =>
+      buildView(graph, layouted, pins, interaction, {
+        onDeleteNote: handleDeleteNote,
+        onStartEdit: handleStartEdit,
+        onSaveEdit: handleSaveEdit,
+        onSaveDraft: handleSaveDraft,
+        onCancelInteraction: handleCancelInteraction,
+        onConfirmConnection: handleConfirmConnection,
+        onEdgeChanged: handleEdgeChanged,
+        onPinNote: handlePinNote,
+        onUnpinNote: onUnpinNote,
+        onChangeDepth: onSetPinDepth
+      }),
+    [
+      graph,
+      layouted,
+      pins,
+      interaction,
+      handleDeleteNote,
+      handleStartEdit,
+      handleSaveEdit,
+      handleSaveDraft,
+      handleCancelInteraction,
+      handleConfirmConnection,
+      handleEdgeChanged,
+      handlePinNote,
+      onUnpinNote,
+      onSetPinDepth
+    ]
+  )
 
   return (
     <ReactFlow

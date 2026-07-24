@@ -52,17 +52,23 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
         style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
       />
 
-      {data.kind === 'note'
-        ? CONNECT_HANDLE_POSITIONS.map((position) => (
-            <Handle
-              key={position}
-              id={position}
-              type="source"
-              position={position}
-              className="note-connect-handle"
-            />
-          ))
-        : null}
+      {/*
+        Always mounted, regardless of kind - React Flow derives edge geometry from
+        handle bounds even for a custom edge type that recomputes its own path
+        (see FloatingEdge/getEdgeParams), so unmounting these while editing/drafting
+        would drop that node's outgoing edges. Hide non-'note' kinds visually via the
+        base .react-flow__handle rule (opacity:0, pointer-events:none) instead of
+        removing them from the DOM - see https://reactflow.dev/learn/customization/handles.
+      */}
+      {CONNECT_HANDLE_POSITIONS.map((position) => (
+        <Handle
+          key={position}
+          id={position}
+          type="source"
+          position={position}
+          className={data.kind === 'note' ? 'note-connect-handle' : undefined}
+        />
+      ))}
 
       {data.kind === 'note' ? (
         <NoteCard

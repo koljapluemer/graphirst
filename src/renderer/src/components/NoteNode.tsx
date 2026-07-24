@@ -10,6 +10,7 @@ export type NoteNodeData =
       /** How many hops of relations to render from this note, or null if it isn't pinned. */
       pinDepth: number | null
       onDelete: (filename: string) => Promise<void>
+      onEdit: (filename: string) => void
       onPin: (filename: string) => void
       onUnpin: (filename: string) => void
       onChangeDepth: (filename: string, nextDepth: number) => void
@@ -19,6 +20,12 @@ export type NoteNodeData =
       /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
       showRelation: boolean
       onSave: (body: string, label: string, reverse: boolean) => Promise<void>
+      onCancel: () => void
+    }
+  | {
+      kind: 'edit'
+      initialBody: string
+      onSave: (body: string) => Promise<void>
       onCancel: () => void
     }
 
@@ -62,9 +69,18 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
           note={data.note}
           pinDepth={data.pinDepth}
           onDelete={data.onDelete}
+          onEdit={data.onEdit}
           onPin={data.onPin}
           onUnpin={data.onUnpin}
           onChangeDepth={data.onChangeDepth}
+        />
+      ) : data.kind === 'edit' ? (
+        <DraftNoteCard
+          mode="edit"
+          initialBody={data.initialBody}
+          showRelation={false}
+          onSave={(body) => data.onSave(body)}
+          onCancel={data.onCancel}
         />
       ) : (
         <DraftNoteCard

@@ -22,6 +22,7 @@ import type {
   PinSpec,
   RawNoteFile,
   SearchResult,
+  UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
 
@@ -216,6 +217,17 @@ export class NoteStore {
     }
 
     await unlink(join(this.graphPath, request.filename))
+    await this.ensureIndexed(true)
+  }
+
+  async updateNote(request: UpdateNoteRequest): Promise<void> {
+    await this.ensureIndexed()
+
+    if (!this.notes.has(request.filename)) {
+      throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
+    }
+
+    await this.mutateBody(request.filename, request.body)
     await this.ensureIndexed(true)
   }
 
@@ -775,6 +787,15 @@ export class NoteStore {
     await this.mutateRelations(filename, (rels) => {
       rels.push(relation)
     })
+  }
+
+  /** Reads, mutates, and rewrites a note's `body` in place, without disturbing fields this app doesn't otherwise read/write. */
+  private async mutateBody(filename: string, body: string): Promise<void> {
+    const path = join(this.graphPath, filename)
+    const raw = await readFile(path, 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    parsed.body = body
+    await writeFile(path, JSON.stringify(parsed, null, 2), 'utf8')
   }
 
   /** Reads, mutates, and rewrites a note's `rels` in place, without disturbing fields this app doesn't otherwise read/write. */

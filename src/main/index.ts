@@ -9,6 +9,7 @@ import type {
   DeleteNoteRequest,
   DeleteRelationRequest,
   PinSpec,
+  UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
 
@@ -76,6 +77,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:delete', async (_event, request: DeleteNoteRequest) => {
     return noteStore.deleteNote(request)
+  })
+
+  ipcMain.handle('notes:update', async (_event, request: UpdateNoteRequest) => {
+    return noteStore.updateNote(request)
   })
 
   ipcMain.handle('notes:connect', async (_event, request: ConnectNotesRequest) => {

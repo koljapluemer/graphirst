@@ -10,6 +10,7 @@ const notesApi: NotesApi = {
   refresh: () => ipcRenderer.invoke('notes:refresh'),
   createNote: (request) => ipcRenderer.invoke('notes:create', request),
   deleteNote: (request) => ipcRenderer.invoke('notes:delete', request),
+  updateNote: (request) => ipcRenderer.invoke('notes:update', request),
   connectNotes: (request) => ipcRenderer.invoke('notes:connect', request),
   updateRelationLabel: (request) => ipcRenderer.invoke('notes:update-relation-label', request),
   deleteRelation: (request) => ipcRenderer.invoke('notes:delete-relation', request)

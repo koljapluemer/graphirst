@@ -2,6 +2,10 @@ import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 export interface DraftNoteCardProps {
+  /** 'edit' reuses this same card to edit an existing note's body in place, in lieu of a separate dialog. */
+  mode?: 'create' | 'edit'
+  /** Body to prefill the textarea with - only meaningful in 'edit' mode. */
+  initialBody?: string
   /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
   showRelation: boolean
   onSave: (body: string, label: string, reverse: boolean) => Promise<void>
@@ -9,11 +13,13 @@ export interface DraftNoteCardProps {
 }
 
 export default function DraftNoteCard({
+  mode = 'create',
+  initialBody = '',
   showRelation,
   onSave,
   onCancel
 }: DraftNoteCardProps): React.JSX.Element {
-  const [body, setBody] = useState('')
+  const [body, setBody] = useState(initialBody)
   const [label, setLabel] = useState('')
   const [reverse, setReverse] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -44,7 +50,7 @@ export default function DraftNoteCard({
     <article className="note-card rounded-[24px] border border-dashed border-[#d6b49e] bg-[rgba(255,251,246,0.98)] px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)]">
       <div className="note-drag-handle mb-3 flex cursor-grab items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-[#a3806a]">
-          New note
+          {mode === 'edit' ? 'Edit note' : 'New note'}
         </span>
         <button
           type="button"

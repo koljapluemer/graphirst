@@ -70,7 +70,7 @@ interface LayoutedGraph {
  * draft note AND a pending connection open at once, because there is only one
  * `interaction` value.
  */
-type Interaction = IdleInteraction | DraftInteraction | ConnectingInteraction
+type Interaction = IdleInteraction | DraftInteraction | ConnectingInteraction | EditInteraction
 
 interface IdleInteraction {
   type: 'idle'
@@ -90,10 +90,17 @@ interface ConnectingInteraction {
   target: string
 }
 
+interface EditInteraction {
+  type: 'edit'
+  filename: string
+}
+
 const IDLE_INTERACTION: Interaction = { type: 'idle' }
 
 interface ViewCallbacks {
   onDeleteNote: (filename: string) => Promise<void>
+  onStartEdit: (filename: string) => void
+  onSaveEdit: (filename: string, body: string) => Promise<void>
   onSaveDraft: (
     draft: DraftInteraction,
     body: string,
@@ -124,24 +131,43 @@ function buildView(
   interaction: Interaction,
   callbacks: ViewCallbacks
 ): { nodes: NoteFlowNode[]; edges: Edge[] } {
-  const nodes: NoteFlowNode[] = layouted.nodes.map((item) => ({
-    id: item.note.filename,
-    type: 'note',
-    position: item.position,
-    width: item.width,
-    height: item.height,
-    selectable: true,
-    dragHandle: '.note-drag-handle',
-    data: {
-      kind: 'note',
-      note: item.note,
-      pinDepth: pins.get(item.note.filename) ?? null,
-      onDelete: callbacks.onDeleteNote,
-      onPin: callbacks.onPinNote,
-      onUnpin: callbacks.onUnpinNote,
-      onChangeDepth: callbacks.onChangeDepth
+  const nodes: NoteFlowNode[] = layouted.nodes.map((item) => {
+    const shared = {
+      id: item.note.filename,
+      type: 'note' as const,
+      position: item.position,
+      width: item.width,
+      height: item.height,
+      selectable: true,
+      dragHandle: '.note-drag-handle'
     }
-  }))
+
+    if (interaction.type === 'edit' && interaction.filename === item.note.filename) {
+      return {
+        ...shared,
+        data: {
+          kind: 'edit',
+          initialBody: item.note.body,
+          onSave: (body: string) => callbacks.onSaveEdit(item.note.filename, body),
+          onCancel: callbacks.onCancelInteraction
+        }
+      }
+    }
+
+    return {
+      ...shared,
+      data: {
+        kind: 'note',
+        note: item.note,
+        pinDepth: pins.get(item.note.filename) ?? null,
+        onDelete: callbacks.onDeleteNote,
+        onEdit: callbacks.onStartEdit,
+        onPin: callbacks.onPinNote,
+        onUnpin: callbacks.onUnpinNote,
+        onChangeDepth: callbacks.onChangeDepth
+      }
+    }
+  })
 
   const knownFilenames = new Set(nodes.map((node) => node.id))
   const positions = new Map(layouted.nodes.map((item) => [item.note.filename, item.position]))
@@ -360,6 +386,16 @@ function FlowScene({
     onUnpinNote(filename)
   }
 
+  const handleStartEdit = useCallback((filename: string) => {
+    setInteraction({ type: 'edit', filename })
+  }, [])
+
+  const handleSaveEdit = async (filename: string, body: string): Promise<void> => {
+    await window.api.notes.updateNote({ filename, body })
+    setInteraction(IDLE_INTERACTION)
+    onRefetch()
+  }
+
   const handleConfirmConnection = async (
     connecting: ConnectingInteraction,
     label: string
@@ -387,6 +423,8 @@ function FlowScene({
 
   const { nodes, edges } = buildView(graph, layouted, pins, interaction, {
     onDeleteNote: handleDeleteNote,
+    onStartEdit: handleStartEdit,
+    onSaveEdit: handleSaveEdit,
     onSaveDraft: handleSaveDraft,
     onCancelInteraction: handleCancelInteraction,
     onConfirmConnection: handleConfirmConnection,

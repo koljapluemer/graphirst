@@ -104,6 +104,11 @@ export interface DeleteNoteRequest {
   filename: string
 }
 
+export interface UpdateNoteRequest {
+  filename: string
+  body: string
+}
+
 export interface ConnectNotesRequest {
   source: string
   target: string
@@ -136,6 +141,7 @@ export interface NotesApi {
   refresh: () => Promise<NotesBootstrap>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
   deleteNote: (request: DeleteNoteRequest) => Promise<void>
+  updateNote: (request: UpdateNoteRequest) => Promise<void>
   connectNotes: (request: ConnectNotesRequest) => Promise<ConnectNotesResponse>
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>

@@ -1,4 +1,4 @@
-import { ExternalLink, Trash2 } from 'lucide-react'
+import { ExternalLink, Pencil, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -9,6 +9,7 @@ export default function NoteCard({
   note,
   pinDepth,
   onDelete,
+  onEdit,
   onPin,
   onUnpin,
   onChangeDepth
@@ -16,6 +17,7 @@ export default function NoteCard({
   note: GraphNodePayload
   pinDepth: number | null
   onDelete: (filename: string) => Promise<void>
+  onEdit: (filename: string) => void
   onPin: (filename: string) => void
   onUnpin: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
@@ -75,17 +77,30 @@ export default function NoteCard({
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c]"
-            onClick={(event) => {
-              event.stopPropagation()
-              setConfirming(true)
-            }}
-            title="Delete this note"
-          >
-            <Trash2 className="size-3.5" />
-          </button>
+          <div className="nodrag flex items-center gap-1">
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
+              onClick={(event) => {
+                event.stopPropagation()
+                onEdit(note.filename)
+              }}
+              title="Edit this note"
+            >
+              <Pencil className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c]"
+              onClick={(event) => {
+                event.stopPropagation()
+                setConfirming(true)
+              }}
+              title="Delete this note"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </div>
         )}
       </div>
 

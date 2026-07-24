@@ -1,5 +1,12 @@
 import { Position, type InternalNode } from '@xyflow/react'
 
+// Nodes and the edge-label-renderer layer are unstacked siblings with no z-index
+// of their own (see @xyflow/react/dist/style.css), so without an explicit value
+// here a note card painted after an edge in the DOM always covers that edge's
+// label/form. Pick something comfortably above EDITING_NODE_Z_INDEX (see
+// GraphCanvas) so an interactive edge form never ends up trapped behind a note.
+export const EDGE_OVERLAY_Z_INDEX = 1001
+
 interface Point {
   x: number
   y: number

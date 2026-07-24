@@ -5,14 +5,15 @@ import {
   useInternalNode,
   type EdgeProps
 } from '@xyflow/react'
-import { Check, Trash2, X } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import { getEdgeParams } from './graph-edge-geometry'
+import { EDGE_OVERLAY_Z_INDEX, getEdgeParams } from './graph-edge-geometry'
 import type { GraphEdgePayload } from '../../../shared/notes'
 
 export interface FloatingEdgeData extends Record<string, unknown> {
   relations: GraphEdgePayload[]
   onChanged?: () => void
+  onDeleteRelation?: (relation: GraphEdgePayload) => Promise<void>
 }
 
 export default function FloatingEdge({
@@ -28,7 +29,6 @@ export default function FloatingEdge({
   const targetNode = useInternalNode(target)
   const [editing, setEditing] = useState(false)
   const [labels, setLabels] = useState<string[]>([])
-  const [confirmingDeleteIndex, setConfirmingDeleteIndex] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,7 +36,7 @@ export default function FloatingEdge({
     return null
   }
 
-  const { relations = [], onChanged } = (data ?? {}) as Partial<FloatingEdgeData>
+  const { relations = [], onChanged, onDeleteRelation } = (data ?? {}) as Partial<FloatingEdgeData>
   const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(sourceNode, targetNode)
 
   const [path, labelX, labelY] = getBezierPath({
@@ -51,7 +51,6 @@ export default function FloatingEdge({
 
   const openEditor = (): void => {
     setLabels(relations.map((relation) => relation.label))
-    setConfirmingDeleteIndex(null)
     setError(null)
     setEditing(true)
   }
@@ -89,13 +88,8 @@ export default function FloatingEdge({
     setError(null)
 
     try {
-      await window.api.notes.deleteRelation({
-        source: relation.source,
-        target: relation.target,
-        label: relation.label
-      })
+      await onDeleteRelation?.(relation)
       setEditing(false)
-      onChanged?.()
     } catch (deleteError) {
       setError((deleteError as Error).message)
       setBusy(false)
@@ -112,7 +106,8 @@ export default function FloatingEdge({
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              pointerEvents: 'all'
+              pointerEvents: 'all',
+              zIndex: EDGE_OVERLAY_Z_INDEX
             }}
           >
             {editing ? (
@@ -137,35 +132,14 @@ export default function FloatingEdge({
                       }}
                       className="w-full rounded-full border border-[#eadbc9] bg-white/80 px-2.5 py-1 text-xs outline-none focus:border-[#d6a17d]"
                     />
-                    {confirmingDeleteIndex === index ? (
-                      <>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-xs rounded-full"
-                          onClick={() => setConfirmingDeleteIndex(null)}
-                          title="Cancel"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-xs rounded-full border-none bg-[#b3462c] text-white hover:bg-[#96391f]"
-                          onClick={() => void handleDelete(relation)}
-                          title="Confirm delete"
-                        >
-                          <Check className="size-3.5" />
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-xs rounded-full text-[#b3462c]"
-                        onClick={() => setConfirmingDeleteIndex(index)}
-                        title="Delete this relationship"
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-xs rounded-full text-[#b3462c]"
+                      onClick={() => void handleDelete(relation)}
+                      title="Delete this relationship"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
                   </div>
                 ))}
                 {error ? <p className="mb-1.5 text-[11px] text-[#b3462c]">{error}</p> : null}

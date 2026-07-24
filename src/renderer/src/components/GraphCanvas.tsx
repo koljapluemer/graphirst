@@ -3,6 +3,7 @@ import {
   Background,
   Controls,
   MarkerType,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   useNodesInitialized,
@@ -125,6 +126,7 @@ interface ViewCallbacks {
   onCancelInteraction: () => void
   onConfirmConnection: (connecting: ConnectingInteraction, label: string) => Promise<void>
   onEdgeChanged: () => void
+  onDeleteRelation: (relation: GraphEdgePayload) => Promise<void>
   onPinNote: (filename: string) => void
   onUnpinNote: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
@@ -203,7 +205,8 @@ function buildView(
     ...edge,
     data: {
       ...(edge.data as Record<string, unknown> | undefined),
-      onChanged: callbacks.onEdgeChanged
+      onChanged: callbacks.onEdgeChanged,
+      onDeleteRelation: callbacks.onDeleteRelation
     }
   }))
 
@@ -256,6 +259,44 @@ function buildView(
   }
 
   return { nodes, edges }
+}
+
+interface UndoAction {
+  message: string
+  perform: () => Promise<void>
+}
+
+const UNDO_TIMEOUT_MS = 6000
+
+/**
+ * Backs the bottom "Undo" popover for deletes (see instant-delete elsewhere in
+ * this file): notes/relations are removed immediately, with the backend
+ * keeping just the single most recent deletion around (see NoteStore.undoDelete)
+ * for this to restore. A later delete's popover simply replaces this one,
+ * matching the single-slot backend.
+ */
+function useUndoToast(): {
+  undoAction: UndoAction | null
+  showUndo: (message: string, perform: () => Promise<void>) => void
+  dismissUndo: () => void
+} {
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
+
+  useEffect(() => {
+    if (!undoAction) {
+      return
+    }
+    const timer = setTimeout(() => setUndoAction(null), UNDO_TIMEOUT_MS)
+    return () => clearTimeout(timer)
+  }, [undoAction])
+
+  const showUndo = useCallback((message: string, perform: () => Promise<void>) => {
+    setUndoAction({ message, perform })
+  }, [])
+
+  const dismissUndo = useCallback(() => setUndoAction(null), [])
+
+  return { undoAction, showUndo, dismissUndo }
 }
 
 function FlowScene({
@@ -387,6 +428,8 @@ function FlowScene({
     setInteraction(IDLE_INTERACTION)
   }, [])
 
+  const { undoAction, showUndo, dismissUndo } = useUndoToast()
+
   const handleSaveDraft = useCallback(
     async (
       draft: DraftInteraction,
@@ -411,10 +454,18 @@ function FlowScene({
 
   const handleDeleteNote = useCallback(
     async (filename: string): Promise<void> => {
+      const priorDepth = pins.get(filename) ?? null
       await window.api.notes.deleteNote({ filename })
       onUnpinNote(filename)
+      showUndo('Note deleted.', async () => {
+        await window.api.notes.undoDelete()
+        if (priorDepth !== null) {
+          onPinNote(filename, priorDepth)
+        }
+        onRefetch()
+      })
     },
-    [onUnpinNote]
+    [onUnpinNote, onPinNote, onRefetch, pins, showUndo]
   )
 
   const handleStartEdit = useCallback((filename: string) => {
@@ -448,12 +499,37 @@ function FlowScene({
     onRefetch()
   }, [onRefetch])
 
+  const handleDeleteRelation = useCallback(
+    async (relation: GraphEdgePayload): Promise<void> => {
+      await window.api.notes.deleteRelation({
+        source: relation.source,
+        target: relation.target,
+        label: relation.label
+      })
+      onRefetch()
+      showUndo('Relationship deleted.', async () => {
+        await window.api.notes.undoDelete()
+        onRefetch()
+      })
+    },
+    [onRefetch, showUndo]
+  )
+
   const handlePinNote = useCallback(
     (filename: string) => {
       onPinNote(filename, MANUAL_PIN_DEPTH)
     },
     [onPinNote]
   )
+
+  const handleUndo = useCallback(() => {
+    if (!undoAction) {
+      return
+    }
+    const action = undoAction
+    dismissUndo()
+    void action.perform()
+  }, [undoAction, dismissUndo])
 
   // Memoized so the node/edge objects handed to <ReactFlow> keep referential identity
   // across renders that don't actually change the view - React Flow's adoptUserNodes
@@ -472,6 +548,7 @@ function FlowScene({
         onCancelInteraction: handleCancelInteraction,
         onConfirmConnection: handleConfirmConnection,
         onEdgeChanged: handleEdgeChanged,
+        onDeleteRelation: handleDeleteRelation,
         onPinNote: handlePinNote,
         onUnpinNote: onUnpinNote,
         onChangeDepth: onSetPinDepth
@@ -488,6 +565,7 @@ function FlowScene({
       handleCancelInteraction,
       handleConfirmConnection,
       handleEdgeChanged,
+      handleDeleteRelation,
       handlePinNote,
       onUnpinNote,
       onSetPinDepth
@@ -522,6 +600,20 @@ function FlowScene({
     >
       <Background gap={28} color="#eadfce" />
       <Controls showInteractive={false} />
+      {undoAction ? (
+        <Panel position="bottom-center">
+          <div className="flex items-center gap-3 rounded-full border border-[#e2d3c4] bg-[rgba(255,252,247,0.98)] px-4 py-2 text-sm text-[#4a382c] shadow-[0_18px_40px_rgba(122,95,74,0.22)]">
+            <span>{undoAction.message}</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs rounded-full text-[#b3672c]"
+              onClick={handleUndo}
+            >
+              Undo
+            </button>
+          </div>
+        </Panel>
+      ) : null}
     </ReactFlow>
   )
 }

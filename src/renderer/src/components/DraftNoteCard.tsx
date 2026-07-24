@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 export interface DraftNoteCardProps {
   /** 'edit' reuses this same card to edit an existing note's body in place, in lieu of a separate dialog. */
@@ -27,8 +27,22 @@ export default function DraftNoteCard({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    textareaRef.current?.focus()
+    // Deferred a frame: this card can mount mid-drag (dropping a connection onto
+    // empty canvas), and React Flow's own pointerup/connection-end handling is
+    // still settling focus at that point - focusing synchronously on mount loses
+    // that race and the pane keeps focus instead of this textarea.
+    const frame = requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+    return () => cancelAnimationFrame(frame)
   }, [])
+
+  const handleFieldEscape = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      onCancel()
+    }
+  }
 
   const handleSave = async (): Promise<void> => {
     if (!body.trim() || saving) {
@@ -86,7 +100,7 @@ export default function DraftNoteCard({
               className="w-full rounded-[10px] border border-[#eadbc9] bg-white/70 px-2 py-1.5 text-sm outline-none focus:border-[#d6a17d]"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
-              onKeyDown={(event) => event.stopPropagation()}
+              onKeyDown={handleFieldEscape}
               placeholder="related"
             />
           </label>
@@ -97,6 +111,7 @@ export default function DraftNoteCard({
               className="checkbox checkbox-xs"
               checked={reverse}
               onChange={(event) => setReverse(event.target.checked)}
+              onKeyDown={handleFieldEscape}
             />
             Reverse direction
           </label>

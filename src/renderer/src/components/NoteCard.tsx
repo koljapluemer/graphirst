@@ -22,11 +22,10 @@ export default function NoteCard({
   onUnpin: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
 }): React.JSX.Element {
-  const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleConfirmDelete = async (): Promise<void> => {
+  const handleDelete = async (): Promise<void> => {
     setDeleting(true)
     setError(null)
 
@@ -35,7 +34,6 @@ export default function NoteCard({
     } catch (deleteError) {
       setError((deleteError as Error).message)
       setDeleting(false)
-      setConfirming(false)
     }
   }
 
@@ -56,52 +54,31 @@ export default function NoteCard({
           onUnpin={() => onUnpin(note.filename)}
           onChangeDepth={(next) => onChangeDepth(note.filename, next)}
         />
-        {confirming ? (
-          <div className="nodrag flex items-center gap-1.5">
-            <span className="text-xs text-[#8b6f5d]">Delete this note?</span>
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs rounded-full"
-              onClick={() => setConfirming(false)}
-              disabled={deleting}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-xs rounded-full border-none bg-[#b3462c] text-white hover:bg-[#96391f]"
-              onClick={() => void handleConfirmDelete()}
-              disabled={deleting}
-            >
-              {deleting ? 'Deleting…' : 'Delete'}
-            </button>
-          </div>
-        ) : (
-          <div className="nodrag flex items-center gap-1">
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
-              onClick={(event) => {
-                event.stopPropagation()
-                onEdit(note.filename)
-              }}
-              title="Edit this note"
-            >
-              <Pencil className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c]"
-              onClick={(event) => {
-                event.stopPropagation()
-                setConfirming(true)
-              }}
-              title="Delete this note"
-            >
-              <Trash2 className="size-3.5" />
-            </button>
-          </div>
-        )}
+        <div className="nodrag flex items-center gap-1">
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
+            onClick={(event) => {
+              event.stopPropagation()
+              onEdit(note.filename)
+            }}
+            title="Edit this note"
+          >
+            <Pencil className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c] disabled:opacity-50"
+            onClick={(event) => {
+              event.stopPropagation()
+              void handleDelete()
+            }}
+            disabled={deleting}
+            title="Delete this note"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
       </div>
 
       {error ? <p className="mb-2 text-xs text-[#b3462c]">{error}</p> : null}

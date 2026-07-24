@@ -143,6 +143,11 @@ export interface RandomOrphanResponse {
   filename: string | null
 }
 
+export interface UndoDeleteResponse {
+  /** False when there was nothing pending to undo (already restored, or superseded by a later delete). */
+  restored: boolean
+}
+
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
   search: (query: string) => Promise<NotesSearchResponse>
@@ -156,4 +161,6 @@ export interface NotesApi {
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>
   randomOrphan: (request: RandomOrphanRequest) => Promise<RandomOrphanResponse>
+  /** Restores whatever `deleteNote`/`deleteRelation` most recently removed. */
+  undoDelete: () => Promise<UndoDeleteResponse>
 }

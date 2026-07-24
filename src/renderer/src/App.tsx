@@ -190,8 +190,8 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <main className="min-h-screen p-4 text-[#2c1f17]" data-theme="autumn">
-      <div className="grid min-h-[calc(100vh-2rem)] grid-cols-[minmax(0,1fr)_22rem] gap-4">
+    <main className="h-screen p-4 text-[#2c1f17]" data-theme="autumn">
+      <div className="grid h-[calc(100vh-2rem)] grid-cols-[minmax(0,1fr)_22rem] gap-4">
         <section className="relative min-h-0">
           <button
             type="button"

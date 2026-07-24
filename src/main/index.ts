@@ -100,6 +100,10 @@ app.whenReady().then(() => {
     return noteStore.randomOrphan(request)
   })
 
+  ipcMain.handle('notes:undo-delete', async () => {
+    return noteStore.undoDelete()
+  })
+
   ipcMain.handle('notes:pick-directory', async () => {
     const selection = await dialog.showOpenDialog({
       title: 'Choose graph folder',

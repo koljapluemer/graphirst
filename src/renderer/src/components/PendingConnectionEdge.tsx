@@ -7,7 +7,7 @@ import {
 } from '@xyflow/react'
 import { X } from 'lucide-react'
 import { useState } from 'react'
-import { getEdgeParams } from './graph-edge-geometry'
+import { EDGE_OVERLAY_Z_INDEX, getEdgeParams } from './graph-edge-geometry'
 
 export interface PendingConnectionEdgeData extends Record<string, unknown> {
   onConfirm: (label: string) => Promise<void>
@@ -69,7 +69,8 @@ export default function PendingConnectionEdge({
           style={{
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-            pointerEvents: 'all'
+            pointerEvents: 'all',
+            zIndex: EDGE_OVERLAY_Z_INDEX
           }}
         >
           <form

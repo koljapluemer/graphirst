@@ -24,6 +24,7 @@ import type {
   RandomOrphanResponse,
   RawNoteFile,
   SearchResult,
+  UndoDeleteResponse,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
@@ -71,6 +72,11 @@ interface RelationDraft {
   direction: 'incoming' | 'outgoing'
 }
 
+/** The single most recent deletion, kept just long enough for the UI's undo popup to act on it. */
+type PendingUndo =
+  | { type: 'note'; filename: string; raw: string }
+  | { type: 'relation'; source: string; relation: NoteRelationTuple }
+
 interface GraphBuildContext {
   nodes: Map<string, NodeMeta>
   edges: Map<string, GraphEdgePayload>
@@ -92,6 +98,7 @@ export class NoteStore {
   private message?: string
   private hasIndexed = false
   private inFlightIndex: Promise<void> | null = null
+  private pendingUndo: PendingUndo | null = null
 
   constructor(settingsDir: string) {
     this.settingsPath = join(settingsDir, SETTINGS_FILE_NAME)
@@ -115,6 +122,7 @@ export class NoteStore {
   async setGraphPath(graphPath: string): Promise<NotesBootstrap> {
     this.graphPath = graphPath
     this.hasIndexed = false
+    this.pendingUndo = null
     await this.persistSettings()
     await this.ensureIndexed(true)
     return this.getBootstrap()
@@ -218,7 +226,10 @@ export class NoteStore {
       throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
     }
 
-    await unlink(join(this.graphPath, request.filename))
+    const path = join(this.graphPath, request.filename)
+    const raw = await readFile(path, 'utf8')
+    await unlink(path)
+    this.pendingUndo = { type: 'note', filename: request.filename, raw }
     await this.ensureIndexed(true)
   }
 
@@ -264,6 +275,8 @@ export class NoteStore {
   }
 
   async deleteRelation(request: DeleteRelationRequest): Promise<void> {
+    let removed: NoteRelationTuple | null = null
+
     await this.mutateRelations(request.source, (rels) => {
       const index = rels.findIndex(
         ([label, target]) => label === request.label && target === request.target
@@ -271,9 +284,30 @@ export class NoteStore {
       if (index === -1) {
         throw new Error(`Could not find that relationship in "${request.source}".`)
       }
+      removed = rels[index]
       rels.splice(index, 1)
     })
+
+    this.pendingUndo = { type: 'relation', source: request.source, relation: removed! }
     await this.ensureIndexed(true)
+  }
+
+  async undoDelete(): Promise<UndoDeleteResponse> {
+    const pending = this.pendingUndo
+    if (!pending) {
+      return { restored: false }
+    }
+
+    this.pendingUndo = null
+
+    if (pending.type === 'note') {
+      await writeFile(join(this.graphPath, pending.filename), pending.raw, 'utf8')
+    } else {
+      await this.appendRelation(pending.source, pending.relation)
+    }
+
+    await this.ensureIndexed(true)
+    return { restored: true }
   }
 
   async randomOrphan(request: RandomOrphanRequest): Promise<RandomOrphanResponse> {

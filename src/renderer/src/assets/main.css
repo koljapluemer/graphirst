@@ -38,6 +38,11 @@ input {
   background: transparent;
   box-shadow: none;
   padding: 0;
+  transition: transform 300ms ease;
+}
+
+.react-flow__node.dragging {
+  transition: none;
 }
 
 .react-flow__handle {

@@ -42,7 +42,12 @@ const ELK_LAYOUT_OPTIONS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
   'elk.edgeRouting': 'SPLINES',
-  'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+  // Interactive mode + seeding each node's previous position (see getLayoutedGraph)
+  // biases crossing-minimization and placement toward the existing layout instead
+  // of solving fresh each time, so unrelated nodes mostly stay put when the graph
+  // changes.
+  'elk.interactive': 'true',
+  'elk.layered.crossingMinimization.strategy': 'INTERACTIVE',
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
   'elk.spacing.nodeNode': `${NODE_GAP}`,
@@ -265,14 +270,19 @@ function FlowScene({
   const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [] })
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
   const connectingFromRef = useRef<string | null>(null)
+  // Mirrors `layouted` outside of state so runLayout can read the latest positions
+  // without depending on `layouted` in the effect below - depending on it directly
+  // would re-trigger this same effect every time it finishes.
+  const layoutedRef = useRef<LayoutedGraph>({ nodes: [] })
 
   useEffect(() => {
     let cancelled = false
 
     const runLayout = async (): Promise<void> => {
       try {
-        const nextLayout = await getLayoutedGraph(graph)
+        const nextLayout = await getLayoutedGraph(graph, layoutedRef.current)
         if (!cancelled) {
+          layoutedRef.current = nextLayout
           setLayouted(nextLayout)
         }
       } catch (error) {
@@ -544,7 +554,10 @@ export default function GraphCanvas({
   )
 }
 
-async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
+async function getLayoutedGraph(
+  graph: NoteGraph,
+  previousLayout: LayoutedGraph
+): Promise<LayoutedGraph> {
   const nodeSizes = new Map(
     graph.nodes.map((note) => [
       note.filename,
@@ -557,14 +570,28 @@ async function getLayoutedGraph(graph: NoteGraph): Promise<LayoutedGraph> {
 
   const knownFilenames = new Set(graph.nodes.map((note) => note.filename))
 
+  // Previous center positions, converted back to ELK's top-left convention, so
+  // ELK's interactive mode has something to anchor to instead of solving from
+  // a blank slate.
+  const previousPositions = new Map(
+    previousLayout.nodes.map((item) => [item.note.filename, item.position])
+  )
+
   const elkGraph: ElkNode = {
     id: 'root',
     layoutOptions: ELK_LAYOUT_OPTIONS,
-    children: graph.nodes.map((note) => ({
-      id: note.filename,
-      width: nodeSizes.get(note.filename)?.width ?? NODE_WIDTH,
-      height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
-    })),
+    children: graph.nodes.map((note) => {
+      const width = nodeSizes.get(note.filename)?.width ?? NODE_WIDTH
+      const height = nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
+      const previous = previousPositions.get(note.filename)
+
+      return {
+        id: note.filename,
+        width,
+        height,
+        ...(previous ? { x: previous.x - width / 2, y: previous.y - height / 2 } : {})
+      }
+    }),
     // ELK throws if an edge references a node id not present in `children` above -
     // defend against that even though the backend is expected not to send one.
     edges: graph.edges

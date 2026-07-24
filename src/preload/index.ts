@@ -13,7 +13,8 @@ const notesApi: NotesApi = {
   updateNote: (request) => ipcRenderer.invoke('notes:update', request),
   connectNotes: (request) => ipcRenderer.invoke('notes:connect', request),
   updateRelationLabel: (request) => ipcRenderer.invoke('notes:update-relation-label', request),
-  deleteRelation: (request) => ipcRenderer.invoke('notes:delete-relation', request)
+  deleteRelation: (request) => ipcRenderer.invoke('notes:delete-relation', request),
+  randomOrphan: (request) => ipcRenderer.invoke('notes:random-orphan', request)
 }
 
 const api = {

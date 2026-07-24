@@ -9,6 +9,7 @@ import type {
   DeleteNoteRequest,
   DeleteRelationRequest,
   PinSpec,
+  RandomOrphanRequest,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
@@ -93,6 +94,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:delete-relation', async (_event, request: DeleteRelationRequest) => {
     return noteStore.deleteRelation(request)
+  })
+
+  ipcMain.handle('notes:random-orphan', async (_event, request: RandomOrphanRequest) => {
+    return noteStore.randomOrphan(request)
   })
 
   ipcMain.handle('notes:pick-directory', async () => {

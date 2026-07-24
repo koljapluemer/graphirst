@@ -133,6 +133,16 @@ export interface DeleteRelationRequest {
   label: string
 }
 
+export interface RandomOrphanRequest {
+  /** Filenames to exclude from the pick, i.e. notes already open on the graph. */
+  exclude: string[]
+}
+
+export interface RandomOrphanResponse {
+  /** Null when no orphan note is available to pick. */
+  filename: string | null
+}
+
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
   search: (query: string) => Promise<NotesSearchResponse>
@@ -145,4 +155,5 @@ export interface NotesApi {
   connectNotes: (request: ConnectNotesRequest) => Promise<ConnectNotesResponse>
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>
+  randomOrphan: (request: RandomOrphanRequest) => Promise<RandomOrphanResponse>
 }

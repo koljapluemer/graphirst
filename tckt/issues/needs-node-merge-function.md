@@ -1,0 +1,1 @@
+we need some flow to merge two notes...but we need to define more specific use cases for this

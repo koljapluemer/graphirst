@@ -1,7 +1,16 @@
 import { startTransition, useDeferredValue, useEffect, useState } from 'react'
-import { AlertTriangle, FolderOpen, LoaderCircle, RefreshCw, Search, Settings2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  Dices,
+  FolderOpen,
+  LoaderCircle,
+  PinOff,
+  RefreshCw,
+  Search,
+  Settings2
+} from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
-import { SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
+import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import type { NotesBootstrap, SearchResult } from '../../shared/notes'
 
 function App(): React.JSX.Element {
@@ -25,6 +34,7 @@ function App(): React.JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [orphanBusy, setOrphanBusy] = useState(false)
   const deferredQuery = useDeferredValue(query)
 
   useEffect(() => {
@@ -151,6 +161,23 @@ function App(): React.JSX.Element {
     }
   }
 
+  const handlePinRandomOrphan = async (): Promise<void> => {
+    setOrphanBusy(true)
+    try {
+      const response = await window.api.notes.randomOrphan({ exclude: Array.from(pins.keys()) })
+      if (response.filename) {
+        pinNote(response.filename, MANUAL_PIN_DEPTH)
+        setErrorMessage(null)
+      } else {
+        setErrorMessage('No unopened orphan notes left to pin.')
+      }
+    } catch (error) {
+      setErrorMessage((error as Error).message)
+    } finally {
+      setOrphanBusy(false)
+    }
+  }
+
   if (bootLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center" data-theme="autumn">
@@ -273,6 +300,27 @@ function App(): React.JSX.Element {
                 )
               })}
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 border-t border-[#ecdfd2] px-4 py-3">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm flex-1 rounded-full border border-[#e7d9cb] bg-[rgba(255,248,241,0.75)]"
+              onClick={clearPins}
+              disabled={pins.size === 0}
+            >
+              <PinOff className="size-4" />
+              Unpin all
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm flex-1 rounded-full border border-[#e7d9cb] bg-[rgba(255,248,241,0.75)]"
+              onClick={() => void handlePinRandomOrphan()}
+              disabled={orphanBusy}
+            >
+              <Dices className={['size-4', orphanBusy ? 'animate-spin' : ''].join(' ')} />
+              Pin random orphan
+            </button>
           </div>
         </aside>
       </div>

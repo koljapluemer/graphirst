@@ -12,7 +12,6 @@ import type { GraphEdgePayload } from '../../../shared/notes'
 
 export interface FloatingEdgeData extends Record<string, unknown> {
   relations: GraphEdgePayload[]
-  onChanged?: () => void
   onDeleteRelation?: (relation: GraphEdgePayload) => Promise<void>
 }
 
@@ -36,7 +35,7 @@ export default function FloatingEdge({
     return null
   }
 
-  const { relations = [], onChanged, onDeleteRelation } = (data ?? {}) as Partial<FloatingEdgeData>
+  const { relations = [], onDeleteRelation } = (data ?? {}) as Partial<FloatingEdgeData>
   const { sx, sy, tx, ty, sourcePos, targetPos } = getEdgeParams(sourceNode, targetNode)
 
   const [path, labelX, labelY] = getBezierPath({
@@ -75,7 +74,6 @@ export default function FloatingEdge({
         })
       )
       setEditing(false)
-      onChanged?.()
     } catch (saveError) {
       setError((saveError as Error).message)
     } finally {

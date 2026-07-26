@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -93,7 +94,10 @@ interface GraphBuildContext {
   skippedNodes: number
 }
 
-export class NoteStore {
+/** Emitted whenever the note index is rebuilt - the single "notes changed" signal (see NotesApi.onChanged). */
+export const NOTES_CHANGED_EVENT = 'changed'
+
+export class NoteStore extends EventEmitter {
   private readonly settingsPath: string
   private graphPath = DEFAULT_GRAPH_PATH
   private lastPins: PinSpec[] = []
@@ -109,6 +113,7 @@ export class NoteStore {
   private pendingUndo: PendingUndo | null = null
 
   constructor(settingsDir: string) {
+    super()
     this.settingsPath = join(settingsDir, SETTINGS_FILE_NAME)
   }
 
@@ -431,9 +436,13 @@ export class NoteStore {
     }
 
     if (!this.inFlightIndex) {
-      this.inFlightIndex = this.rebuildIndex().finally(() => {
-        this.inFlightIndex = null
-      })
+      this.inFlightIndex = this.rebuildIndex()
+        .then(() => {
+          this.emit(NOTES_CHANGED_EVENT)
+        })
+        .finally(() => {
+          this.inFlightIndex = null
+        })
     }
 
     await this.inFlightIndex

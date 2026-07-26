@@ -76,6 +76,17 @@ function App(): React.JSX.Element {
 
   const displayedError = errorMessage ?? graphError
 
+  // The single place that reacts to "notes changed" - every mutation (delete, edit,
+  // create, connect, relation change, undo, ...) funnels through the backend's one
+  // rebuild-and-emit path, so this is the only refresh wiring any of them need,
+  // instead of each call site remembering to poke the graph *and* the search results.
+  useEffect(() => {
+    return window.api.notes.onChanged(() => {
+      refetch()
+      setRefreshKey((value) => value + 1)
+    })
+  }, [refetch])
+
   useEffect(() => {
     let ignore = false
 
@@ -217,7 +228,6 @@ function App(): React.JSX.Element {
               onPinNote={pinNote}
               onUnpinNote={unpinNote}
               onSetPinDepth={setPinDepth}
-              onRefetch={refetch}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />

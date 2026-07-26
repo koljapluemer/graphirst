@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { basename, join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { NoteStore } from './note-store'
+import { NOTES_CHANGED_EVENT, NoteStore } from './note-store'
 import type {
   ConnectNotesRequest,
   CreateNoteRequest,
@@ -67,6 +67,15 @@ function createWindow(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
   noteStore = new NoteStore(app.getPath('userData'))
+
+  // Single fan-out point for "the note index changed" - every renderer-side view
+  // (graph, search, ...) subscribes to this instead of individual mutations having
+  // to remember which views need poking (see tckt/issues/sidebar-out-of-sync-with-true-note-state.md).
+  noteStore.on(NOTES_CHANGED_EVENT, () => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('notes:changed')
+    }
+  })
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)

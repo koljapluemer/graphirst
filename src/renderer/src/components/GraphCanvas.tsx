@@ -65,7 +65,6 @@ interface GraphCanvasProps {
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
-  onRefetch: () => void
 }
 
 interface LayoutedNode {
@@ -126,7 +125,6 @@ interface ViewCallbacks {
   ) => Promise<void>
   onCancelInteraction: () => void
   onConfirmConnection: (connecting: ConnectingInteraction, label: string) => Promise<void>
-  onEdgeChanged: () => void
   onDeleteRelation: (relation: GraphEdgePayload) => Promise<void>
   onPinNote: (filename: string) => void
   onUnpinNote: (filename: string) => void
@@ -210,7 +208,6 @@ function buildView(
     ...edge,
     data: {
       ...(edge.data as Record<string, unknown> | undefined),
-      onChanged: callbacks.onEdgeChanged,
       onDeleteRelation: callbacks.onDeleteRelation
     }
   }))
@@ -310,15 +307,13 @@ function FlowScene({
   pins,
   onPinNote,
   onUnpinNote,
-  onSetPinDepth,
-  onRefetch
+  onSetPinDepth
 }: {
   graph: NoteGraph
   pins: ReadonlyMap<string, number>
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
-  onRefetch: () => void
 }): React.JSX.Element {
   const { fitView, screenToFlowPosition } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
@@ -509,21 +504,14 @@ function FlowScene({
       const priorDepth = pins.get(filename) ?? null
       await window.api.notes.deleteNote({ filename })
       onUnpinNote(filename)
-      // Unconditional, unlike onUnpinNote above: unpinning only re-fetches when the
-      // deleted note was itself a pin (see useNoteGraph's pins-keyed effect). A
-      // deleted note reached only as a relation neighbor never touches `pins`, so
-      // without this the graph would keep showing it - stale - until some unrelated
-      // action happened to trigger a refetch.
-      onRefetch()
       showUndo('Note deleted.', async () => {
         await window.api.notes.undoDelete()
         if (priorDepth !== null) {
           onPinNote(filename, priorDepth)
         }
-        onRefetch()
       })
     },
-    [onUnpinNote, onPinNote, onRefetch, pins, showUndo]
+    [onUnpinNote, onPinNote, pins, showUndo]
   )
 
   const handleStartEdit = useCallback((filename: string) => {
@@ -535,9 +523,8 @@ function FlowScene({
       await window.api.notes.updateNote({ filename, body, image })
       markInteraction(filename)
       setInteraction(IDLE_INTERACTION)
-      onRefetch()
     },
-    [onRefetch, markInteraction]
+    [markInteraction]
   )
 
   const handleConfirmConnection = useCallback(
@@ -550,14 +537,9 @@ function FlowScene({
 
       markInteraction(connecting.target)
       setInteraction(IDLE_INTERACTION)
-      onRefetch()
     },
-    [onRefetch, markInteraction]
+    [markInteraction]
   )
-
-  const handleEdgeChanged = useCallback(() => {
-    onRefetch()
-  }, [onRefetch])
 
   const handleDeleteRelation = useCallback(
     async (relation: GraphEdgePayload): Promise<void> => {
@@ -566,13 +548,11 @@ function FlowScene({
         target: relation.target,
         label: relation.label
       })
-      onRefetch()
       showUndo('Relationship deleted.', async () => {
         await window.api.notes.undoDelete()
-        onRefetch()
       })
     },
-    [onRefetch, showUndo]
+    [showUndo]
   )
 
   const handlePinNote = useCallback(
@@ -607,7 +587,6 @@ function FlowScene({
         onSaveDraft: handleSaveDraft,
         onCancelInteraction: handleCancelInteraction,
         onConfirmConnection: handleConfirmConnection,
-        onEdgeChanged: handleEdgeChanged,
         onDeleteRelation: handleDeleteRelation,
         onPinNote: handlePinNote,
         onUnpinNote: onUnpinNote,
@@ -625,7 +604,6 @@ function FlowScene({
       handleSaveDraft,
       handleCancelInteraction,
       handleConfirmConnection,
-      handleEdgeChanged,
       handleDeleteRelation,
       handlePinNote,
       onUnpinNote,
@@ -685,8 +663,7 @@ export default function GraphCanvas({
   pins,
   onPinNote,
   onUnpinNote,
-  onSetPinDepth,
-  onRefetch
+  onSetPinDepth
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph || graph.nodes.length === 0) {
     return (
@@ -708,7 +685,6 @@ export default function GraphCanvas({
           onPinNote={onPinNote}
           onUnpinNote={onUnpinNote}
           onSetPinDepth={onSetPinDepth}
-          onRefetch={onRefetch}
         />
       </ReactFlowProvider>
     </div>

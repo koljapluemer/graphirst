@@ -181,4 +181,13 @@ export interface NotesApi {
   randomOrphan: (request: RandomOrphanRequest) => Promise<RandomOrphanResponse>
   /** Restores whatever `deleteNote`/`deleteRelation` most recently removed. */
   undoDelete: () => Promise<UndoDeleteResponse>
+  /**
+   * Fires whenever the backend's note index is rebuilt - after any mutation
+   * (create/update/delete/connect/relation change/undo) as well as manual
+   * re-index and folder switches. This is the single signal every note-derived
+   * view (graph, search, ...) should key its own refresh off of, rather than
+   * each mutation call site remembering to poke every consumer individually.
+   * Returns an unsubscribe function.
+   */
+  onChanged: (callback: () => void) => () => void
 }

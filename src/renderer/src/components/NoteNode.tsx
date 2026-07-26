@@ -9,6 +9,8 @@ export type NoteNodeData =
       note: GraphNodePayload
       /** How many hops of relations to render from this note, or null if it isn't pinned. */
       pinDepth: number | null
+      /** Whether this note is the current session's soft anchor for placing new notes. */
+      isAnchor: boolean
       onDelete: (filename: string) => Promise<void>
       onEdit: (filename: string) => void
       onPin: (filename: string) => void
@@ -74,6 +76,7 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
         <NoteCard
           note={data.note}
           pinDepth={data.pinDepth}
+          isAnchor={data.isAnchor}
           onDelete={data.onDelete}
           onEdit={data.onEdit}
           onPin={data.onPin}

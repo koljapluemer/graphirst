@@ -8,6 +8,7 @@ import type { GraphNodePayload } from '../../../shared/notes'
 export default function NoteCard({
   note,
   pinDepth,
+  isAnchor,
   onDelete,
   onEdit,
   onPin,
@@ -16,6 +17,7 @@ export default function NoteCard({
 }: {
   note: GraphNodePayload
   pinDepth: number | null
+  isAnchor: boolean
   onDelete: (filename: string) => Promise<void>
   onEdit: (filename: string) => void
   onPin: (filename: string) => void
@@ -44,6 +46,7 @@ export default function NoteCard({
         'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)] transition-transform duration-200',
         pinDepth !== null ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
         note.missing ? 'note-card-missing' : '',
+        isAnchor ? 'border-dashed' : '',
         'bg-[rgba(255,251,246,0.96)]'
       ].join(' ')}
     >

@@ -146,6 +146,7 @@ function buildView(
   layouted: LayoutedGraph,
   pins: ReadonlyMap<string, number>,
   interaction: Interaction,
+  anchorFilename: string | null,
   callbacks: ViewCallbacks
 ): { nodes: NoteFlowNode[]; edges: Edge[] } {
   const nodes: NoteFlowNode[] = layouted.nodes.map((item) => {
@@ -182,6 +183,7 @@ function buildView(
         kind: 'note',
         note: item.note,
         pinDepth: pins.get(item.note.filename) ?? null,
+        isAnchor: item.note.filename === anchorFilename,
         onDelete: callbacks.onDeleteNote,
         onEdit: callbacks.onStartEdit,
         onPin: callbacks.onPinNote,
@@ -324,14 +326,58 @@ function FlowScene({
   // would re-trigger this same effect every time it finishes.
   const layoutedRef = useRef<LayoutedGraph>({ nodes: [] })
 
+  // The filename a brand-new, otherwise-unconnected node's position gets seeded
+  // from - without this, a note pinned with no relation to anything already on
+  // screen gets laid out from scratch by ELK with no relation to where the
+  // existing graph actually is, which can leave the two so far apart that
+  // fitView zooms out past the point where either is actually visible.
+  const anchorRef = useRef<string | null>(null)
+  const [anchorFilename, setAnchorFilename] = useState<string | null>(null)
+  // Filename most recently added or acted on - promoted to the real anchor once
+  // it has a resolved position (immediately if it already existed, next layout
+  // pass if it's new), so a fresh pin never ends up seeded from itself. Tracked
+  // as state (not a ref) since it's set from callbacks handed to buildView -
+  // refs shouldn't be read/written from code that isn't known to run outside
+  // render, and a plain state setter is.
+  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null)
+  const pendingAnchorRef = useRef<string | null>(null)
+  const previousPinsRef = useRef<ReadonlyMap<string, number>>(new Map())
+
+  useEffect(() => {
+    pendingAnchorRef.current = pendingAnchor
+  }, [pendingAnchor])
+
+  const markInteraction = useCallback((filename: string) => {
+    setPendingAnchor(filename)
+  }, [])
+
+  useEffect(() => {
+    for (const filename of pins.keys()) {
+      if (!previousPinsRef.current.has(filename)) {
+        markInteraction(filename)
+      }
+    }
+    previousPinsRef.current = pins
+  }, [pins, markInteraction])
+
   useEffect(() => {
     let cancelled = false
 
     const runLayout = async (): Promise<void> => {
       try {
-        const nextLayout = await getLayoutedGraph(graph, layoutedRef.current)
+        const nextLayout = await getLayoutedGraph(graph, layoutedRef.current, anchorRef.current)
         if (!cancelled) {
           layoutedRef.current = nextLayout
+
+          const pending = pendingAnchorRef.current
+          if (pending && pending !== anchorRef.current) {
+            const resolved = nextLayout.nodes.some((item) => item.note.filename === pending)
+            if (resolved) {
+              anchorRef.current = pending
+              setAnchorFilename(pending)
+            }
+          }
+
           setLayouted(nextLayout)
         }
       } catch (error) {
@@ -475,10 +521,11 @@ function FlowScene({
   const handleSaveEdit = useCallback(
     async (filename: string, body: string): Promise<void> => {
       await window.api.notes.updateNote({ filename, body })
+      markInteraction(filename)
       setInteraction(IDLE_INTERACTION)
       onRefetch()
     },
-    [onRefetch]
+    [onRefetch, markInteraction]
   )
 
   const handleConfirmConnection = useCallback(
@@ -489,10 +536,11 @@ function FlowScene({
         label
       })
 
+      markInteraction(connecting.target)
       setInteraction(IDLE_INTERACTION)
       onRefetch()
     },
-    [onRefetch]
+    [onRefetch, markInteraction]
   )
 
   const handleEdgeChanged = useCallback(() => {
@@ -540,7 +588,7 @@ function FlowScene({
   // ResizeObserver hadn't fired again yet.
   const { nodes, edges } = useMemo(
     () =>
-      buildView(graph, layouted, pins, interaction, {
+      buildView(graph, layouted, pins, interaction, anchorFilename, {
         onDeleteNote: handleDeleteNote,
         onStartEdit: handleStartEdit,
         onSaveEdit: handleSaveEdit,
@@ -558,6 +606,7 @@ function FlowScene({
       layouted,
       pins,
       interaction,
+      anchorFilename,
       handleDeleteNote,
       handleStartEdit,
       handleSaveEdit,
@@ -656,7 +705,8 @@ export default function GraphCanvas({
 
 async function getLayoutedGraph(
   graph: NoteGraph,
-  previousLayout: LayoutedGraph
+  previousLayout: LayoutedGraph,
+  anchorFilename: string | null
 ): Promise<LayoutedGraph> {
   const nodeSizes = new Map(
     graph.nodes.map((note) => [
@@ -677,13 +727,26 @@ async function getLayoutedGraph(
     previousLayout.nodes.map((item) => [item.note.filename, item.position])
   )
 
+  // A note with no previous position of its own (freshly pinned, or newly
+  // discovered around a freshly pinned note) has nothing tying it to where the
+  // rest of the graph already lives. Seed it near the anchor instead of letting
+  // ELK place it from scratch - otherwise a disconnected new cluster can land
+  // anywhere in the coordinate space, and fitView then has to zoom out to fit
+  // both, sometimes far enough that neither ends up actually on screen.
+  const anchorSeed = anchorFilename ? previousPositions.get(anchorFilename) : undefined
+  // Offset rather than reuse the anchor's exact coordinate, so a fresh node isn't
+  // asking ELK to place it directly on top of the node it's anchored to.
+  const anchorPosition = anchorSeed
+    ? { x: anchorSeed.x + NODE_WIDTH + LAYER_GAP, y: anchorSeed.y }
+    : undefined
+
   const elkGraph: ElkNode = {
     id: 'root',
     layoutOptions: ELK_LAYOUT_OPTIONS,
     children: graph.nodes.map((note) => {
       const width = nodeSizes.get(note.filename)?.width ?? NODE_WIDTH
       const height = nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
-      const previous = previousPositions.get(note.filename)
+      const previous = previousPositions.get(note.filename) ?? anchorPosition
 
       return {
         id: note.filename,

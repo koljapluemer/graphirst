@@ -1,5 +1,6 @@
-import { app, shell, BrowserWindow, dialog, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
+import { readFile } from 'node:fs/promises'
+import { basename, join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { NoteStore } from './note-store'
@@ -10,9 +11,25 @@ import type {
   DeleteRelationRequest,
   PinSpec,
   RandomOrphanRequest,
+  SaveImageRequest,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
+
+const MEDIA_PROTOCOL = 'media'
+const MEDIA_MIME_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif'
+}
+
+// Must run before app 'ready' - registers the scheme itself as privileged
+// (fetchable, CSP-friendly) so protocol.handle can serve real responses for it below.
+protocol.registerSchemesAsPrivileged([
+  { scheme: MEDIA_PROTOCOL, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+])
 
 let noteStore: NoteStore
 
@@ -55,6 +72,26 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  // Serves note-attached images straight out of <graphPath>/media - reads the graph
+  // path fresh on every request (rather than capturing it once) since it can change
+  // at runtime via pickDirectory/setGraphPath.
+  protocol.handle(MEDIA_PROTOCOL, async (request) => {
+    const filename = basename(decodeURIComponent(new URL(request.url).hostname))
+    const extension = filename.split('.').pop()?.toLowerCase() ?? ''
+    const mimeType = MEDIA_MIME_TYPES[extension]
+
+    if (!filename || !mimeType) {
+      return new Response(null, { status: 404 })
+    }
+
+    try {
+      const data = await readFile(join(noteStore.getCurrentPath(), 'media', filename))
+      return new Response(data, { headers: { 'content-type': mimeType } })
+    } catch {
+      return new Response(null, { status: 404 })
+    }
+  })
+
   ipcMain.handle('notes:get-bootstrap', async () => {
     await noteStore.loadSettings()
     return noteStore.getBootstrap()
@@ -82,6 +119,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:update', async (_event, request: UpdateNoteRequest) => {
     return noteStore.updateNote(request)
+  })
+
+  ipcMain.handle('notes:save-image', async (_event, request: SaveImageRequest) => {
+    return noteStore.saveImage(request)
   })
 
   ipcMain.handle('notes:connect', async (_event, request: ConnectNotesRequest) => {

@@ -45,7 +45,6 @@ export default function NoteCard({
         'note-card',
         'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)] transition-transform duration-200',
         pinDepth !== null ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
-        note.missing ? 'note-card-missing' : '',
         isAnchor ? 'border-dashed' : '',
         'bg-[rgba(255,251,246,0.96)]'
       ].join(' ')}
@@ -85,6 +84,10 @@ export default function NoteCard({
       </div>
 
       {error ? <p className="mb-2 text-xs text-[#b3462c]">{error}</p> : null}
+
+      {note.image ? (
+        <img src={`media://${note.image}`} alt="" className="mb-3 h-auto w-full rounded-[14px]" />
+      ) : null}
 
       <div className="note-markdown text-[#352921]">
         {note.body.trim() ? (

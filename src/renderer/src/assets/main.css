@@ -100,10 +100,6 @@ input {
   background: linear-gradient(180deg, rgba(255, 250, 244, 0.98), rgba(255, 244, 234, 0.97)), white;
 }
 
-.note-card-missing {
-  border-style: dashed;
-}
-
 .note-markdown {
   font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
   font-size: 15px;

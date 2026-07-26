@@ -116,12 +116,13 @@ const IDLE_INTERACTION: Interaction = { type: 'idle' }
 interface ViewCallbacks {
   onDeleteNote: (filename: string) => Promise<void>
   onStartEdit: (filename: string) => void
-  onSaveEdit: (filename: string, body: string) => Promise<void>
+  onSaveEdit: (filename: string, body: string, image: string | null) => Promise<void>
   onSaveDraft: (
     draft: DraftInteraction,
     body: string,
     label: string,
-    reverse: boolean
+    reverse: boolean,
+    image: string | null
   ) => Promise<void>
   onCancelInteraction: () => void
   onConfirmConnection: (connecting: ConnectingInteraction, label: string) => Promise<void>
@@ -171,7 +172,9 @@ function buildView(
         data: {
           kind: 'edit',
           initialBody: item.note.body,
-          onSave: (body: string) => callbacks.onSaveEdit(item.note.filename, body),
+          initialImage: item.note.image,
+          onSave: (body: string, image: string | null) =>
+            callbacks.onSaveEdit(item.note.filename, body, image),
           onCancel: callbacks.onCancelInteraction
         }
       }
@@ -224,7 +227,8 @@ function buildView(
       data: {
         kind: 'draft',
         showRelation: interaction.sourceFilename !== null,
-        onSave: (body, label, reverse) => callbacks.onSaveDraft(interaction, body, label, reverse),
+        onSave: (body, label, reverse, image) =>
+          callbacks.onSaveDraft(interaction, body, label, reverse, image),
         onCancel: callbacks.onCancelInteraction
       }
     })
@@ -481,13 +485,15 @@ function FlowScene({
       draft: DraftInteraction,
       body: string,
       label: string,
-      reverse: boolean
+      reverse: boolean,
+      image: string | null
     ): Promise<void> => {
       const response = await window.api.notes.createNote({
         relatedFilename: draft.sourceFilename ?? undefined,
         label,
         reverse,
-        body
+        body,
+        image: image ?? undefined
       })
 
       // The new note becomes its own BFS root, so its relation to the source renders
@@ -503,6 +509,12 @@ function FlowScene({
       const priorDepth = pins.get(filename) ?? null
       await window.api.notes.deleteNote({ filename })
       onUnpinNote(filename)
+      // Unconditional, unlike onUnpinNote above: unpinning only re-fetches when the
+      // deleted note was itself a pin (see useNoteGraph's pins-keyed effect). A
+      // deleted note reached only as a relation neighbor never touches `pins`, so
+      // without this the graph would keep showing it - stale - until some unrelated
+      // action happened to trigger a refetch.
+      onRefetch()
       showUndo('Note deleted.', async () => {
         await window.api.notes.undoDelete()
         if (priorDepth !== null) {
@@ -519,8 +531,8 @@ function FlowScene({
   }, [])
 
   const handleSaveEdit = useCallback(
-    async (filename: string, body: string): Promise<void> => {
-      await window.api.notes.updateNote({ filename, body })
+    async (filename: string, body: string, image: string | null): Promise<void> => {
+      await window.api.notes.updateNote({ filename, body, image })
       markInteraction(filename)
       setInteraction(IDLE_INTERACTION)
       onRefetch()
@@ -901,11 +913,15 @@ function buildReciprocalEdge(
   }
 }
 
+// Matches the max-h-44 (176px) cap the attached-image preview renders at in NoteCard.
+const IMAGE_HEIGHT_ESTIMATE = 176
+
 function estimateNodeHeight(note: GraphNodePayload): number {
   const lineCount = note.body.split('\n').length
   const textWeight = Math.ceil(note.body.length / 110)
+  const imageHeight = note.image ? IMAGE_HEIGHT_ESTIMATE : 0
   return Math.min(
-    Math.max(NODE_MIN_HEIGHT, 120 + Math.max(lineCount, textWeight) * 20),
+    Math.max(NODE_MIN_HEIGHT, 120 + Math.max(lineCount, textWeight) * 20 + imageHeight),
     NODE_MAX_HEIGHT
   )
 }

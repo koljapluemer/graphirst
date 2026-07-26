@@ -23,6 +23,8 @@ import type {
   RandomOrphanRequest,
   RandomOrphanResponse,
   RawNoteFile,
+  SaveImageRequest,
+  SaveImageResponse,
   SearchResult,
   UndoDeleteResponse,
   UpdateNoteRequest,
@@ -31,6 +33,7 @@ import type {
 
 const DEFAULT_GRAPH_PATH = '/home/brokkoli/Sync/Graph'
 const SETTINGS_FILE_NAME = 'graphirst-settings.json'
+const MEDIA_DIR_NAME = 'media'
 const MAX_SEARCH_RESULTS = 40
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
@@ -72,9 +75,14 @@ interface RelationDraft {
   direction: 'incoming' | 'outgoing'
 }
 
+interface PendingNoteImage {
+  filename: string
+  data: Buffer
+}
+
 /** The single most recent deletion, kept just long enough for the UI's undo popup to act on it. */
 type PendingUndo =
-  | { type: 'note'; filename: string; raw: string }
+  | { type: 'note'; filename: string; raw: string; image: PendingNoteImage | null }
   | { type: 'relation'; source: string; relation: NoteRelationTuple }
 
 interface GraphBuildContext {
@@ -197,7 +205,7 @@ export class NoteStore {
     const filename = this.generateFilename()
 
     if (!request.relatedFilename) {
-      await this.writeNoteFile(filename, { body: request.body, rels: [] })
+      await this.writeNoteFile(filename, { body: request.body, rels: [], image: request.image })
       await this.ensureIndexed(true)
       return { filename }
     }
@@ -207,10 +215,11 @@ export class NoteStore {
     if (request.reverse) {
       await this.writeNoteFile(filename, {
         body: request.body,
-        rels: [[label, request.relatedFilename]]
+        rels: [[label, request.relatedFilename]],
+        image: request.image
       })
     } else {
-      await this.writeNoteFile(filename, { body: request.body, rels: [] })
+      await this.writeNoteFile(filename, { body: request.body, rels: [], image: request.image })
       await this.appendRelation(request.relatedFilename, [label, filename])
     }
 
@@ -222,26 +231,74 @@ export class NoteStore {
   async deleteNote(request: DeleteNoteRequest): Promise<void> {
     await this.ensureIndexed()
 
-    if (!this.notes.has(request.filename)) {
+    const existing = this.notes.get(request.filename)
+    if (!existing) {
       throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
     }
 
     const path = join(this.graphPath, request.filename)
     const raw = await readFile(path, 'utf8')
+
+    // Kept in memory (not just deleted-and-forgotten) for the same reason the note's
+    // own raw JSON is: `undoDelete` needs to be able to fully restore the note,
+    // image included, without a permanently-broken image reference.
+    let image: PendingNoteImage | null = null
+    if (existing.image) {
+      try {
+        const data = await readFile(this.mediaFilePath(existing.image))
+        image = { filename: existing.image, data }
+      } catch (error) {
+        const maybeError = error as NodeJS.ErrnoException
+        if (maybeError.code !== 'ENOENT') {
+          throw error
+        }
+      }
+      await this.deleteMediaFile(existing.image)
+    }
+
     await unlink(path)
-    this.pendingUndo = { type: 'note', filename: request.filename, raw }
+    this.pendingUndo = { type: 'note', filename: request.filename, raw, image }
     await this.ensureIndexed(true)
   }
 
   async updateNote(request: UpdateNoteRequest): Promise<void> {
     await this.ensureIndexed()
 
-    if (!this.notes.has(request.filename)) {
+    const existing = this.notes.get(request.filename)
+    if (!existing) {
       throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
     }
 
-    await this.mutateBody(request.filename, request.body)
+    await this.mutateRawNote(request.filename, (parsed) => {
+      parsed.body = request.body
+      if (request.image) {
+        parsed.image = request.image
+      } else {
+        delete parsed.image
+      }
+    })
+
+    if (existing.image && existing.image !== request.image) {
+      await this.deleteMediaFile(existing.image)
+    }
+
     await this.ensureIndexed(true)
+  }
+
+  async saveImage(request: SaveImageRequest): Promise<SaveImageResponse> {
+    const match = /^data:image\/(\w+);base64,(.+)$/.exec(request.dataUrl)
+    if (!match) {
+      throw new Error('Unsupported image data.')
+    }
+
+    const [, subtype, base64] = match
+    const extension = subtype === 'jpeg' ? 'jpg' : subtype
+    const filename = `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${extension}`
+
+    await mkdir(this.mediaDir(), { recursive: true })
+    await writeFile(this.mediaFilePath(filename), Buffer.from(base64, 'base64'))
+
+    return { filename }
   }
 
   async connectNotes(request: ConnectNotesRequest): Promise<ConnectNotesResponse> {
@@ -302,6 +359,10 @@ export class NoteStore {
 
     if (pending.type === 'note') {
       await writeFile(join(this.graphPath, pending.filename), pending.raw, 'utf8')
+      if (pending.image) {
+        await mkdir(this.mediaDir(), { recursive: true })
+        await writeFile(this.mediaFilePath(pending.image.filename), pending.image.data)
+      }
     } else {
       await this.appendRelation(pending.source, pending.relation)
     }
@@ -443,6 +504,8 @@ export class NoteStore {
       }
     }
 
+    await this.repairDanglingRelations()
+
     for (const note of this.notes.values()) {
       for (const rel of note.rels) {
         const incoming = this.reverseRefs.get(rel.target) ?? []
@@ -477,13 +540,15 @@ export class NoteStore {
       const rels = Array.isArray(parsed.rels)
         ? parsed.rels.flatMap((rel) => this.normalizeRelation(rel))
         : []
+      const image = typeof parsed.image === 'string' && parsed.image.trim() ? parsed.image : null
 
       return {
         filename,
         body,
         aliases,
         rels,
-        degree: rels.length
+        degree: rels.length,
+        image
       }
     } catch (error) {
       console.warn(`Skipping unreadable note ${filename}:`, error)
@@ -502,6 +567,61 @@ export class NoteStore {
     }
 
     return [{ label, target }]
+  }
+
+  /**
+   * A relation can point at a target that no longer resolves to a real, non-empty
+   * note - most often a note that was just deleted (still within its undo window),
+   * or a note whose body was cleared out from under an existing relationship. Either
+   * way it must never surface as a graph node/edge (see tckt/issues/do-not-show-broken-nodes.md).
+   *
+   * The two cases are handled differently on purpose:
+   * - Missing target (deleted note): dropped from this in-memory pass only. Writing
+   *   this removal back to disk would make `undoDelete` unable to fully restore the
+   *   relationship if the delete is undone a moment later.
+   * - Empty target (note exists but has no body): a durable state, not a race with an
+   *   in-flight delete, so the relationship is actually stripped from the sender's
+   *   file, matching the ticket's "auto-delete the relationship from sender note".
+   */
+  private async repairDanglingRelations(): Promise<void> {
+    const writes: Promise<void>[] = []
+
+    for (const note of this.notes.values()) {
+      let relationToEmptyTarget = false
+      const kept = note.rels.filter((rel) => {
+        const target = this.notes.get(rel.target)
+        if (!target) {
+          return false
+        }
+        if (this.isEmptyBody(target)) {
+          relationToEmptyTarget = true
+          return false
+        }
+        return true
+      })
+
+      if (kept.length === note.rels.length) {
+        continue
+      }
+
+      note.rels = kept
+      if (relationToEmptyTarget) {
+        writes.push(this.persistRelations(note.filename, kept))
+      }
+    }
+
+    await Promise.all(writes)
+  }
+
+  private isEmptyBody(note: IndexedNote): boolean {
+    return note.body.trim().length === 0
+  }
+
+  private async persistRelations(filename: string, rels: NoteLink[]): Promise<void> {
+    await this.mutateRelations(filename, (raw) => {
+      raw.length = 0
+      raw.push(...rels.map((rel): NoteRelationTuple => [rel.label, rel.target]))
+    })
   }
 
   private createSearchIndex(): Document<SearchDocument> {
@@ -645,6 +765,13 @@ export class NoteStore {
    * anything already queued.
    */
   private registerPinRoot(pin: PinSpec, context: GraphBuildContext): void {
+    // A pin can outlive the note it points at (deleted from disk out-of-band, or a
+    // stale pin persisted from a previous session) - there is nothing to render for
+    // it, so skip the root entirely rather than fabricating a placeholder node.
+    if (!this.notes.has(pin.filename)) {
+      return
+    }
+
     const existing = context.nodes.get(pin.filename)
     context.nodes.set(pin.filename, { depth: 0, order: existing?.order ?? context.nodes.size })
 
@@ -677,21 +804,38 @@ export class NoteStore {
   }
 
   private buildOutgoingRelations(filename: string): RelationDraft[] {
-    return this.getOutgoing(filename).map((rel) => ({
-      source: filename,
-      target: rel.target,
-      label: rel.label,
-      direction: 'outgoing' as const
-    }))
+    return this.getOutgoing(filename)
+      .filter((rel) => this.isRenderableNode(rel.target))
+      .map((rel) => ({
+        source: filename,
+        target: rel.target,
+        label: rel.label,
+        direction: 'outgoing' as const
+      }))
   }
 
   private buildIncomingRelations(filename: string): RelationDraft[] {
-    return this.getIncoming(filename).map((rel) => ({
-      source: rel.source,
-      target: filename,
-      label: rel.label,
-      direction: 'incoming' as const
-    }))
+    return this.getIncoming(filename)
+      .filter((rel) => this.isRenderableNode(rel.source))
+      .map((rel) => ({
+        source: rel.source,
+        target: filename,
+        label: rel.label,
+        direction: 'incoming' as const
+      }))
+  }
+
+  /**
+   * Whether a note is fit to be discovered as the *other end* of a relation - i.e.
+   * it actually exists and has content. `repairDanglingRelations` already strips
+   * empty-target relations from disk, and drops missing-target ones from this
+   * in-memory pass, so this is mostly a defensive backstop plus the one case that
+   * repair doesn't cover: an empty note that is itself the *source* of a relation
+   * into some other, perfectly valid note.
+   */
+  private isRenderableNode(filename: string): boolean {
+    const note = this.notes.get(filename)
+    return note !== undefined && !this.isEmptyBody(note)
   }
 
   /** Caps and registers a relation batch, bounded by the discovering pin's own maxDepth. */
@@ -788,15 +932,19 @@ export class NoteStore {
   }
 
   private buildGraphNode(filename: string, meta: NodeMeta): GraphNodePayload {
-    const note = this.notes.get(filename)
+    // Every filename that reaches context.nodes is guaranteed to back a real note:
+    // pin roots for missing notes are skipped in registerPinRoot, and neighbors are
+    // only ever registered through buildOutgoingRelations/buildIncomingRelations,
+    // which filter out missing/empty targets via isRenderableNode before this runs.
+    const note = this.notes.get(filename)!
 
     return {
       filename,
-      body: note?.body ?? 'Referenced note is missing from the current graph folder.',
-      aliases: note?.aliases ?? [],
+      body: note.body,
+      image: note.image,
+      aliases: note.aliases,
       depth: meta.depth,
-      degree: note?.degree ?? 0,
-      missing: !note
+      degree: note.degree
     }
   }
 
@@ -836,9 +984,13 @@ export class NoteStore {
 
   private async writeNoteFile(
     filename: string,
-    data: { body: string; rels: NoteRelationTuple[] }
+    data: { body: string; rels: NoteRelationTuple[]; image?: string }
   ): Promise<void> {
-    await writeFile(join(this.graphPath, filename), JSON.stringify(data, null, 2), 'utf8')
+    const payload: RawNoteFile = { body: data.body, rels: data.rels }
+    if (data.image) {
+      payload.image = data.image
+    }
+    await writeFile(join(this.graphPath, filename), JSON.stringify(payload, null, 2), 'utf8')
   }
 
   private async appendRelation(filename: string, relation: NoteRelationTuple): Promise<void> {
@@ -847,27 +999,48 @@ export class NoteStore {
     })
   }
 
-  /** Reads, mutates, and rewrites a note's `body` in place, without disturbing fields this app doesn't otherwise read/write. */
-  private async mutateBody(filename: string, body: string): Promise<void> {
-    const path = join(this.graphPath, filename)
-    const raw = await readFile(path, 'utf8')
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    parsed.body = body
-    await writeFile(path, JSON.stringify(parsed, null, 2), 'utf8')
-  }
-
-  /** Reads, mutates, and rewrites a note's `rels` in place, without disturbing fields this app doesn't otherwise read/write. */
-  private async mutateRelations(
+  /** Reads, mutates, and rewrites a note's raw JSON in place, without disturbing fields this app doesn't otherwise read/write. */
+  private async mutateRawNote(
     filename: string,
-    mutate: (rels: NoteRelationTuple[]) => void
+    mutate: (parsed: Record<string, unknown>) => void
   ): Promise<void> {
     const path = join(this.graphPath, filename)
     const raw = await readFile(path, 'utf8')
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    const rels: NoteRelationTuple[] = Array.isArray(parsed.rels) ? parsed.rels : []
-    mutate(rels)
-    parsed.rels = rels
+    mutate(parsed)
     await writeFile(path, JSON.stringify(parsed, null, 2), 'utf8')
+  }
+
+  private async mutateRelations(
+    filename: string,
+    mutate: (rels: NoteRelationTuple[]) => void
+  ): Promise<void> {
+    await this.mutateRawNote(filename, (parsed) => {
+      const rels: NoteRelationTuple[] = Array.isArray(parsed.rels)
+        ? (parsed.rels as NoteRelationTuple[])
+        : []
+      mutate(rels)
+      parsed.rels = rels
+    })
+  }
+
+  private mediaDir(): string {
+    return join(this.graphPath, MEDIA_DIR_NAME)
+  }
+
+  private mediaFilePath(filename: string): string {
+    return join(this.mediaDir(), filename)
+  }
+
+  private async deleteMediaFile(filename: string): Promise<void> {
+    try {
+      await unlink(this.mediaFilePath(filename))
+    } catch (error) {
+      const maybeError = error as NodeJS.ErrnoException
+      if (maybeError.code !== 'ENOENT') {
+        throw error
+      }
+    }
   }
 
   private async persistSettings(): Promise<void> {

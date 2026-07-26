@@ -4,6 +4,8 @@ export interface RawNoteFile {
   body?: string
   rels?: NoteRelationTuple[]
   aliases?: string[]
+  /** Filename of an attached image inside the graph folder's media/ subdirectory. */
+  image?: string
 }
 
 export interface NoteLink {
@@ -17,6 +19,7 @@ export interface IndexedNote {
   aliases: string[]
   rels: NoteLink[]
   degree: number
+  image: string | null
 }
 
 export interface PinSpec {
@@ -27,11 +30,11 @@ export interface PinSpec {
 export interface GraphNodePayload {
   filename: string
   body: string
+  image: string | null
   aliases: string[]
   /** Hops from the nearest pin that discovered this node. Informational only. */
   depth: number
   degree: number
-  missing?: boolean
 }
 
 export interface GraphEdgePayload {
@@ -92,6 +95,8 @@ export interface CreateNoteRequest {
   /** When false (default): relatedFilename -> newNote. When true: newNote -> relatedFilename. */
   reverse?: boolean
   body: string
+  /** Filename of an image already written via saveImage(), or omit for none. */
+  image?: string
 }
 
 export interface CreateNoteResponse {
@@ -107,6 +112,18 @@ export interface DeleteNoteRequest {
 export interface UpdateNoteRequest {
   filename: string
   body: string
+  /** Full desired image state - null means "no image", always sent (unlike a PATCH-style partial). */
+  image: string | null
+}
+
+export interface SaveImageRequest {
+  /** A data: URL, e.g. "data:image/webp;base64,...". */
+  dataUrl: string
+}
+
+export interface SaveImageResponse {
+  /** Filename the image was written under inside the graph folder's media/ subdirectory. */
+  filename: string
 }
 
 export interface ConnectNotesRequest {
@@ -157,6 +174,7 @@ export interface NotesApi {
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
   deleteNote: (request: DeleteNoteRequest) => Promise<void>
   updateNote: (request: UpdateNoteRequest) => Promise<void>
+  saveImage: (request: SaveImageRequest) => Promise<SaveImageResponse>
   connectNotes: (request: ConnectNotesRequest) => Promise<ConnectNotesResponse>
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>

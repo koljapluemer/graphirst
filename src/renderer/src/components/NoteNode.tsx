@@ -21,13 +21,14 @@ export type NoteNodeData =
       kind: 'draft'
       /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
       showRelation: boolean
-      onSave: (body: string, label: string, reverse: boolean) => Promise<void>
+      onSave: (body: string, label: string, reverse: boolean, image: string | null) => Promise<void>
       onCancel: () => void
     }
   | {
       kind: 'edit'
       initialBody: string
-      onSave: (body: string) => Promise<void>
+      initialImage: string | null
+      onSave: (body: string, image: string | null) => Promise<void>
       onCancel: () => void
     }
 
@@ -87,8 +88,9 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
         <DraftNoteCard
           mode="edit"
           initialBody={data.initialBody}
+          initialImage={data.initialImage}
           showRelation={false}
-          onSave={(body) => data.onSave(body)}
+          onSave={(body, _label, _reverse, image) => data.onSave(body, image)}
           onCancel={data.onCancel}
         />
       ) : (

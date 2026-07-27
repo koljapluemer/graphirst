@@ -639,6 +639,13 @@ function FlowScene({
     >
       <Background gap={28} color="#eadfce" />
       <Controls showInteractive={false} />
+      {graph.nodes.length === 0 && interaction.type === 'idle' ? (
+        <Panel position="top-center">
+          <div className="pointer-events-none rounded-full border border-[#e2d3c4] bg-[rgba(255,252,247,0.92)] px-4 py-2 text-sm text-[#715748] shadow-[0_18px_40px_rgba(122,95,74,0.12)]">
+            Search for a note to pin it.
+          </div>
+        </Panel>
+      ) : null}
       {undoAction ? (
         <Panel position="bottom-center">
           <div className="flex items-center gap-3 rounded-full border border-[#e2d3c4] bg-[rgba(255,252,247,0.98)] px-4 py-2 text-sm text-[#4a382c] shadow-[0_18px_40px_rgba(122,95,74,0.22)]">
@@ -665,7 +672,7 @@ export default function GraphCanvas({
   onUnpinNote,
   onSetPinDepth
 }: GraphCanvasProps): React.JSX.Element {
-  if (!graph || graph.nodes.length === 0) {
+  if (!graph) {
     return (
       <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-[#dfceb9] bg-[rgba(255,251,246,0.72)] text-sm text-[#715748] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
         Search for a note to pin it.

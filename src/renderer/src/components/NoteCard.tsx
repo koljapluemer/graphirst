@@ -43,23 +43,23 @@ export default function NoteCard({
     <article
       className={[
         'note-card',
-        'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)] transition-transform duration-200',
+        'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)]',
         pinDepth !== null ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
         isAnchor ? 'border-dashed' : '',
         'bg-[rgba(255,251,246,0.96)]'
       ].join(' ')}
     >
-      <div className="note-drag-handle mb-3 flex min-h-6 cursor-grab items-center justify-between">
+      <div className="mb-3 flex min-h-6 items-center justify-between">
         <PinControl
           pinDepth={pinDepth}
           onPin={() => onPin(note.filename)}
           onUnpin={() => onUnpin(note.filename)}
           onChangeDepth={(next) => onChangeDepth(note.filename, next)}
         />
-        <div className="nodrag flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
+            className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
             onClick={(event) => {
               event.stopPropagation()
               onEdit(note.filename)
@@ -70,7 +70,7 @@ export default function NoteCard({
           </button>
           <button
             type="button"
-            className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c] disabled:opacity-50"
+            className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c] disabled:opacity-50"
             onClick={(event) => {
               event.stopPropagation()
               void handleDelete()

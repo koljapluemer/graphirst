@@ -41,10 +41,6 @@ input {
   transition: transform 300ms ease;
 }
 
-.react-flow__node.dragging {
-  transition: none;
-}
-
 .react-flow__handle {
   opacity: 0;
   pointer-events: none;
@@ -66,7 +62,6 @@ input {
 
 .react-flow__node.selectable.selected .note-card,
 .react-flow__node.selectable:focus .note-card {
-  transform: translateY(-4px);
   box-shadow:
     0 26px 60px rgba(122, 95, 74, 0.18),
     0 0 0 2px rgba(213, 105, 69, 0.35);

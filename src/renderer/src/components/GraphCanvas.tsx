@@ -159,8 +159,7 @@ function buildView(
       type: 'note' as const,
       position: item.position,
       width: item.width,
-      selectable: true,
-      dragHandle: '.note-drag-handle'
+      selectable: true
     }
 
     if (interaction.type === 'edit' && interaction.filename === item.note.filename) {
@@ -219,7 +218,6 @@ function buildView(
       position: interaction.position,
       width: NODE_WIDTH,
       selectable: true,
-      dragHandle: '.note-drag-handle',
       zIndex: EDITING_NODE_Z_INDEX,
       data: {
         kind: 'draft',
@@ -620,6 +618,7 @@ function FlowScene({
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
       nodesConnectable
+      nodesDraggable={false}
       connectionRadius={CONNECTION_RADIUS}
       onConnectStart={onConnectStart}
       onConnectEnd={onConnectEnd}

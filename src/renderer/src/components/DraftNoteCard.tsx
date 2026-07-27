@@ -106,13 +106,13 @@ export default function DraftNoteCard({
 
   return (
     <article className="note-card rounded-[24px] border border-dashed border-[#d6b49e] bg-[rgba(255,251,246,0.98)] px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)]">
-      <div className="note-drag-handle mb-3 flex cursor-grab items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-[#a3806a]">
           {mode === 'edit' ? 'Edit note' : 'New note'}
         </span>
         <button
           type="button"
-          className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
+          className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
           onClick={onCancel}
           title="Discard"
         >

@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   Dices,
@@ -11,7 +11,8 @@ import {
 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
-import type { NotesBootstrap, SearchResult } from '../../shared/notes'
+import { useNoteSearch } from './hooks/useNoteSearch'
+import type { NotesBootstrap } from '../../shared/notes'
 
 function App(): React.JSX.Element {
   const [bootstrap, setBootstrap] = useState<NotesBootstrap | null>(null)
@@ -27,15 +28,15 @@ function App(): React.JSX.Element {
     refetch
   } = useNoteGraph()
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[]>([])
   const [bootLoading, setBootLoading] = useState(true)
-  const [searchLoading, setSearchLoading] = useState(false)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [refreshKey, setRefreshKey] = useState(0)
   const [orphanBusy, setOrphanBusy] = useState(false)
-  const deferredQuery = useDeferredValue(query)
+  const { results, loading: searchLoading } = useNoteSearch(query, {
+    enabled: bootstrap?.status === 'ready',
+    onError: (error) => setErrorMessage(error.message)
+  })
 
   useEffect(() => {
     let ignore = false
@@ -83,60 +84,14 @@ function App(): React.JSX.Element {
   useEffect(() => {
     return window.api.notes.onChanged(() => {
       refetch()
-      setRefreshKey((value) => value + 1)
     })
   }, [refetch])
-
-  useEffect(() => {
-    let ignore = false
-
-    const runSearch = async (): Promise<void> => {
-      if (bootstrap?.status !== 'ready') {
-        setResults([])
-        return
-      }
-
-      const trimmed = deferredQuery.trim()
-      if (!trimmed) {
-        setResults([])
-        return
-      }
-
-      setSearchLoading(true)
-
-      try {
-        const response = await window.api.notes.search(trimmed)
-        if (ignore) {
-          return
-        }
-
-        startTransition(() => {
-          setResults(response.results)
-        })
-      } catch (error) {
-        if (!ignore) {
-          setErrorMessage((error as Error).message)
-        }
-      } finally {
-        if (!ignore) {
-          setSearchLoading(false)
-        }
-      }
-    }
-
-    void runSearch()
-
-    return () => {
-      ignore = true
-    }
-  }, [bootstrap?.status, deferredQuery, refreshKey])
 
   const handleRefresh = async (): Promise<void> => {
     setSettingsBusy(true)
     try {
       const state = await window.api.notes.refresh()
       setBootstrap(state)
-      setRefreshKey((value) => value + 1)
       setErrorMessage(null)
 
       if (state.status === 'ready') {
@@ -157,7 +112,6 @@ function App(): React.JSX.Element {
     try {
       const state = await window.api.notes.pickDirectory()
       setBootstrap(state)
-      setRefreshKey((value) => value + 1)
       setErrorMessage(null)
 
       // Only clear pins if the folder actually changed - the picker returns the

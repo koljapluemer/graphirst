@@ -22,8 +22,13 @@ import {
 } from 'react'
 import FloatingEdge from './FloatingEdge'
 import NoteNode, { type NoteFlowNode } from './NoteNode'
+import PaneSearchMenu from './PaneSearchMenu'
 import PendingConnectionEdge from './PendingConnectionEdge'
-import { CREATED_NOTE_PIN_DEPTH, MANUAL_PIN_DEPTH } from '../hooks/useNoteGraph'
+import {
+  CREATED_NOTE_PIN_DEPTH,
+  MANUAL_PIN_DEPTH,
+  SEARCH_RESULT_PIN_DEPTH
+} from '../hooks/useNoteGraph'
 import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
@@ -85,7 +90,8 @@ interface LayoutedGraph {
  * draft note AND a pending connection open at once, because there is only one
  * `interaction` value.
  */
-type Interaction = IdleInteraction | DraftInteraction | ConnectingInteraction | EditInteraction
+type Interaction =
+  IdleInteraction | DraftInteraction | ConnectingInteraction | EditInteraction | SearchInteraction
 
 interface IdleInteraction {
   type: 'idle'
@@ -108,6 +114,12 @@ interface ConnectingInteraction {
 interface EditInteraction {
   type: 'edit'
   filename: string
+}
+
+interface SearchInteraction {
+  type: 'search'
+  /** Viewport (clientX/clientY) coordinates of the right-click that opened this menu. */
+  screenPosition: { x: number; y: number }
 }
 
 const IDLE_INTERACTION: Interaction = { type: 'idle' }
@@ -467,6 +479,14 @@ function FlowScene({
     [screenToFlowPosition]
   )
 
+  const handlePaneContextMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
+    event.preventDefault()
+    setInteraction({
+      type: 'search',
+      screenPosition: { x: event.clientX, y: event.clientY }
+    })
+  }, [])
+
   const handleCancelInteraction = useCallback(() => {
     setInteraction(IDLE_INTERACTION)
   }, [])
@@ -560,6 +580,16 @@ function FlowScene({
     [onPinNote]
   )
 
+  // Left open after picking a result (see PaneSearchMenu) rather than resetting
+  // to idle, so the same right-click session can pin several search matches in
+  // a row without reopening the menu each time.
+  const handleSelectSearchNote = useCallback(
+    (filename: string) => {
+      onPinNote(filename, SEARCH_RESULT_PIN_DEPTH)
+    },
+    [onPinNote]
+  )
+
   const handleUndo = useCallback(() => {
     if (!undoAction) {
       return
@@ -623,6 +653,7 @@ function FlowScene({
       onConnectStart={onConnectStart}
       onConnectEnd={onConnectEnd}
       onDoubleClick={handlePaneDoubleClick}
+      onPaneContextMenu={handlePaneContextMenu}
       zoomOnDoubleClick={false}
       connectionLineStyle={{ stroke: '#d36945', strokeWidth: 1.6, strokeDasharray: '4 4' }}
       minZoom={0.02}
@@ -658,6 +689,14 @@ function FlowScene({
             </button>
           </div>
         </Panel>
+      ) : null}
+      {interaction.type === 'search' ? (
+        <PaneSearchMenu
+          screenPosition={interaction.screenPosition}
+          pins={pins}
+          onSelectNote={handleSelectSearchNote}
+          onClose={handleCancelInteraction}
+        />
       ) : null}
     </ReactFlow>
   )

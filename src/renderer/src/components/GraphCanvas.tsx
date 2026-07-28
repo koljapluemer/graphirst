@@ -659,7 +659,7 @@ function FlowScene({
       minZoom={0.02}
       maxZoom={1.5}
       panOnScroll
-      panOnDrag
+      panOnDrag={[1]}
       selectionOnDrag
       proOptions={{ hideAttribution: true }}
       defaultEdgeOptions={{

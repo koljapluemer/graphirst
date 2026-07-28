@@ -269,7 +269,7 @@ function App(): React.JSX.Element {
           <div className="flex items-center gap-2 border-t border-[#ecdfd2] px-4 py-3">
             <button
               type="button"
-              className="btn btn-ghost btn-sm flex-1 rounded-full border border-[#e7d9cb] bg-[rgba(255,248,241,0.75)]"
+              className="btn"
               onClick={clearPins}
               disabled={pins.size === 0}
             >
@@ -278,12 +278,12 @@ function App(): React.JSX.Element {
             </button>
             <button
               type="button"
-              className="btn btn-ghost btn-sm flex-1 rounded-full border border-[#e7d9cb] bg-[rgba(255,248,241,0.75)]"
+              className="btn"
               onClick={() => void handlePinRandomOrphan()}
               disabled={orphanBusy}
             >
               <Dices className={['size-4', orphanBusy ? 'animate-spin' : ''].join(' ')} />
-              Pin random orphan
+              Pin Orphan
             </button>
           </div>
         </aside>

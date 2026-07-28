@@ -1,7 +1,8 @@
-import { ExternalLink, Pencil, Trash2 } from 'lucide-react'
+import { ExternalLink, Pencil, Tags, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import AliasEditorModal from './AliasEditorModal'
 import PinControl from './PinControl'
 import type { GraphNodePayload } from '../../../shared/notes'
 
@@ -11,6 +12,7 @@ export default function NoteCard({
   isAnchor,
   onDelete,
   onEdit,
+  onUpdateAliases,
   onPin,
   onUnpin,
   onChangeDepth
@@ -20,12 +22,19 @@ export default function NoteCard({
   isAnchor: boolean
   onDelete: (filename: string) => Promise<void>
   onEdit: (filename: string) => void
+  onUpdateAliases: (
+    filename: string,
+    body: string,
+    image: string | null,
+    aliases: string[]
+  ) => Promise<void>
   onPin: (filename: string) => void
   onUnpin: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
 }): React.JSX.Element {
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [aliasModalOpen, setAliasModalOpen] = useState(false)
 
   const handleDelete = async (): Promise<void> => {
     setDeleting(true)
@@ -67,6 +76,17 @@ export default function NoteCard({
             title="Edit this note"
           >
             <Pencil className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-xs rounded-full"
+            onClick={(event) => {
+              event.stopPropagation()
+              setAliasModalOpen(true)
+            }}
+            title="Edit aliases"
+          >
+            <Tags className="size-3.5" />
           </button>
           <button
             type="button"
@@ -113,6 +133,14 @@ export default function NoteCard({
           <p className="italic text-[#8b6f5d]">Empty note</p>
         )}
       </div>
+
+      {aliasModalOpen ? (
+        <AliasEditorModal
+          aliases={note.aliases}
+          onSave={(aliases) => onUpdateAliases(note.filename, note.body, note.image, aliases)}
+          onClose={() => setAliasModalOpen(false)}
+        />
+      ) : null}
     </article>
   )
 }

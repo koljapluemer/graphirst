@@ -114,6 +114,8 @@ export interface UpdateNoteRequest {
   body: string
   /** Full desired image state - null means "no image", always sent (unlike a PATCH-style partial). */
   image: string | null
+  /** Full desired alias list, always sent (unlike a PATCH-style partial). */
+  aliases: string[]
 }
 
 export interface SaveImageRequest {

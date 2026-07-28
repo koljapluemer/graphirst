@@ -13,6 +13,12 @@ export type NoteNodeData =
       isAnchor: boolean
       onDelete: (filename: string) => Promise<void>
       onEdit: (filename: string) => void
+      onUpdateAliases: (
+        filename: string,
+        body: string,
+        image: string | null,
+        aliases: string[]
+      ) => Promise<void>
       onPin: (filename: string) => void
       onUnpin: (filename: string) => void
       onChangeDepth: (filename: string, nextDepth: number) => void
@@ -80,6 +86,7 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
           isAnchor={data.isAnchor}
           onDelete={data.onDelete}
           onEdit={data.onEdit}
+          onUpdateAliases={data.onUpdateAliases}
           onPin={data.onPin}
           onUnpin={data.onUnpin}
           onChangeDepth={data.onChangeDepth}

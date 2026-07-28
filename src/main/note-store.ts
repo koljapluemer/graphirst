@@ -281,6 +281,11 @@ export class NoteStore extends EventEmitter {
       } else {
         delete parsed.image
       }
+      if (request.aliases.length > 0) {
+        parsed.aliases = request.aliases
+      } else {
+        delete parsed.aliases
+      }
     })
 
     if (existing.image && existing.image !== request.image) {

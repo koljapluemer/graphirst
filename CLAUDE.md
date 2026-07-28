@@ -5,4 +5,6 @@ Take the scope of this app seriously. Data base may be 200k+ JSON files.
 Do not spam the UI with inane micro copy or cute extra features I did not ask for.
 
 Assume the user to be NOT STUPID. If you get a bug report, do not assume "The user is blind" or "The user must actually mean barely related problem X", do ACTUALLY read and analyze the stated problem.
-Do not run dev servers. Do not drive the UI. Do not take screenshots. Do not write 1000 LoC playwright screen. When fixing visual problems, ASK THE USER.
+Do not run dev servers. Do not drive the UI. Do not take screenshots. Do not write 1000 LoC playwright scripts. When fixing visual problems, ASK THE USER.
+
+Use tailwind+daisy, overwrite patterns with custom CSS and bespoke config ONLY when absolutely necessary.

@@ -127,7 +127,18 @@ const IDLE_INTERACTION: Interaction = { type: 'idle' }
 interface ViewCallbacks {
   onDeleteNote: (filename: string) => Promise<void>
   onStartEdit: (filename: string) => void
-  onSaveEdit: (filename: string, body: string, image: string | null) => Promise<void>
+  onSaveEdit: (
+    filename: string,
+    body: string,
+    image: string | null,
+    aliases: string[]
+  ) => Promise<void>
+  onUpdateAliases: (
+    filename: string,
+    body: string,
+    image: string | null,
+    aliases: string[]
+  ) => Promise<void>
   onSaveDraft: (
     draft: DraftInteraction,
     body: string,
@@ -183,7 +194,7 @@ function buildView(
           initialBody: item.note.body,
           initialImage: item.note.image,
           onSave: (body: string, image: string | null) =>
-            callbacks.onSaveEdit(item.note.filename, body, image),
+            callbacks.onSaveEdit(item.note.filename, body, image, item.note.aliases),
           onCancel: callbacks.onCancelInteraction
         }
       }
@@ -198,6 +209,7 @@ function buildView(
         isAnchor: item.note.filename === anchorFilename,
         onDelete: callbacks.onDeleteNote,
         onEdit: callbacks.onStartEdit,
+        onUpdateAliases: callbacks.onUpdateAliases,
         onPin: callbacks.onPinNote,
         onUnpin: callbacks.onUnpinNote,
         onChangeDepth: callbacks.onChangeDepth
@@ -537,12 +549,31 @@ function FlowScene({
   }, [])
 
   const handleSaveEdit = useCallback(
-    async (filename: string, body: string, image: string | null): Promise<void> => {
-      await window.api.notes.updateNote({ filename, body, image })
+    async (
+      filename: string,
+      body: string,
+      image: string | null,
+      aliases: string[]
+    ): Promise<void> => {
+      await window.api.notes.updateNote({ filename, body, image, aliases })
       markInteraction(filename)
       setInteraction(IDLE_INTERACTION)
     },
     [markInteraction]
+  )
+
+  // Aliases don't affect body/image, so unlike handleSaveEdit this never touches
+  // layout - no markInteraction/anchor promotion needed.
+  const handleUpdateAliases = useCallback(
+    async (
+      filename: string,
+      body: string,
+      image: string | null,
+      aliases: string[]
+    ): Promise<void> => {
+      await window.api.notes.updateNote({ filename, body, image, aliases })
+    },
+    []
   )
 
   const handleConfirmConnection = useCallback(
@@ -612,6 +643,7 @@ function FlowScene({
         onDeleteNote: handleDeleteNote,
         onStartEdit: handleStartEdit,
         onSaveEdit: handleSaveEdit,
+        onUpdateAliases: handleUpdateAliases,
         onSaveDraft: handleSaveDraft,
         onCancelInteraction: handleCancelInteraction,
         onConfirmConnection: handleConfirmConnection,
@@ -629,6 +661,7 @@ function FlowScene({
       handleDeleteNote,
       handleStartEdit,
       handleSaveEdit,
+      handleUpdateAliases,
       handleSaveDraft,
       handleCancelInteraction,
       handleConfirmConnection,

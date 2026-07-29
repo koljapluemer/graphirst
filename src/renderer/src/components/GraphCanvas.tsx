@@ -44,7 +44,6 @@ const elk = new ELK()
 
 const NODE_WIDTH = 370
 const NODE_MIN_HEIGHT = 220
-const NODE_MAX_HEIGHT = 760
 const NODE_GAP = 64
 const LAYER_GAP = 200
 const ELK_LAYOUT_OPTIONS = {
@@ -974,8 +973,5 @@ function estimateNodeHeight(note: GraphNodePayload): number {
   const lineCount = note.body.split('\n').length
   const textWeight = Math.ceil(note.body.length / 110)
   const imageHeight = note.image ? IMAGE_HEIGHT_ESTIMATE : 0
-  return Math.min(
-    Math.max(NODE_MIN_HEIGHT, 120 + Math.max(lineCount, textWeight) * 20 + imageHeight),
-    NODE_MAX_HEIGHT
-  )
+  return Math.max(NODE_MIN_HEIGHT, 120 + Math.max(lineCount, textWeight) * 20 + imageHeight)
 }

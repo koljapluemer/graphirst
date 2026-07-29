@@ -1,10 +1,12 @@
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react'
-import type { SearchResult } from '../../../shared/notes'
+import type { SearchMode, SearchResult } from '../../../shared/notes'
 
 export interface UseNoteSearchOptions {
   /** Skip searching entirely, e.g. while the graph isn't indexed/ready yet. */
   enabled?: boolean
   onError?: (error: Error) => void
+  /** @default 'fuzzy' */
+  mode?: SearchMode
 }
 
 export interface UseNoteSearchResult {
@@ -23,7 +25,7 @@ export function useNoteSearch(
   query: string,
   options: UseNoteSearchOptions = {}
 ): UseNoteSearchResult {
-  const { enabled = true, onError } = options
+  const { enabled = true, onError, mode = 'fuzzy' } = options
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [changeNonce, setChangeNonce] = useState(0)
@@ -55,7 +57,7 @@ export function useNoteSearch(
       setLoading(true)
 
       try {
-        const response = await window.api.notes.search(trimmed)
+        const response = await window.api.notes.search(trimmed, mode)
         if (ignore) {
           return
         }
@@ -79,7 +81,7 @@ export function useNoteSearch(
     return () => {
       ignore = true
     }
-  }, [enabled, deferredQuery, changeNonce])
+  }, [enabled, deferredQuery, changeNonce, mode])
 
   return { results, loading }
 }

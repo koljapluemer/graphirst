@@ -30,6 +30,7 @@
     "elkjs": "^0.12.0",
     "flexsearch": "^0.8.212",
     "lucide-react": "^1.25.0",
+    "re2-wasm": "^1.0.2",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },

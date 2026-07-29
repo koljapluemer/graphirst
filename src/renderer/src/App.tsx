@@ -10,9 +10,10 @@ import {
   Settings2
 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
+import SearchModeToggle from './components/SearchModeToggle'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
-import type { NotesBootstrap } from '../../shared/notes'
+import type { NotesBootstrap, SearchMode } from '../../shared/notes'
 
 function App(): React.JSX.Element {
   const [bootstrap, setBootstrap] = useState<NotesBootstrap | null>(null)
@@ -28,6 +29,7 @@ function App(): React.JSX.Element {
     refetch
   } = useNoteGraph()
   const [query, setQuery] = useState('')
+  const [searchMode, setSearchMode] = useState<SearchMode>('fuzzy')
   const [bootLoading, setBootLoading] = useState(true)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -35,7 +37,8 @@ function App(): React.JSX.Element {
   const [orphanBusy, setOrphanBusy] = useState(false)
   const { results, loading: searchLoading } = useNoteSearch(query, {
     enabled: bootstrap?.status === 'ready',
-    onError: (error) => setErrorMessage(error.message)
+    onError: (error) => setErrorMessage(error.message),
+    mode: searchMode
   })
 
   useEffect(() => {
@@ -206,6 +209,10 @@ function App(): React.JSX.Element {
               {searchLoading ? (
                 <LoaderCircle className="size-4 animate-spin text-[#8f6f5b]" />
               ) : null}
+              <SearchModeToggle
+                mode={searchMode}
+                onToggle={() => setSearchMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy'))}
+              />
             </label>
 
             <div className="mt-3 flex justify-end">

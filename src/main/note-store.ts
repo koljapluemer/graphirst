@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { Document } from 'flexsearch'
 import type {
   ConnectNotesRequest,
@@ -26,11 +27,18 @@ import type {
   RawNoteFile,
   SaveImageRequest,
   SaveImageResponse,
+  SearchMode,
   SearchResult,
   UndoDeleteResponse,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
+import type {
+  RawSearchCorpusEntry,
+  RawSearchMatch,
+  RawSearchWorkerRequest,
+  RawSearchWorkerResponse
+} from './search-worker-types'
 
 const DEFAULT_GRAPH_PATH = '/home/brokkoli/Sync/Graph'
 const SETTINGS_FILE_NAME = 'graphirst-settings.json'
@@ -39,6 +47,10 @@ const MAX_SEARCH_RESULTS = 40
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
 const MAX_GRAPH_NODES = 140
+/** Candidate cap for the raw/regex worker scan, mirroring the fuzzy path's FlexSearch `limit`. */
+const RAW_SEARCH_CANDIDATE_LIMIT = 120
+/** Defense in depth only - RE2 is linear-time, so this should never actually fire. */
+const RAW_SEARCH_TIMEOUT_MS = 5000
 
 interface StoredSettings {
   graphPath?: string
@@ -111,10 +123,23 @@ export class NoteStore extends EventEmitter {
   private hasIndexed = false
   private inFlightIndex: Promise<void> | null = null
   private pendingUndo: PendingUndo | null = null
+  /** Resident copy mirrored into the raw-search worker on every reindex - see syncSearchWorker. */
+  private rawSearchCorpus: RawSearchCorpusEntry[] = []
+  private searchWorker: Worker
+  private nextRawRequestId = 1
+  private pendingRawRequests = new Map<
+    number,
+    {
+      resolve: (matches: RawSearchMatch[]) => void
+      reject: (error: Error) => void
+      timeout: NodeJS.Timeout
+    }
+  >()
 
   constructor(settingsDir: string) {
     super()
     this.settingsPath = join(settingsDir, SETTINGS_FILE_NAME)
+    this.searchWorker = this.spawnSearchWorker()
   }
 
   getCurrentPath(): string {
@@ -146,7 +171,7 @@ export class NoteStore extends EventEmitter {
     return this.getBootstrap()
   }
 
-  async search(query: string): Promise<NotesSearchResponse> {
+  async search(query: string, mode: SearchMode = 'fuzzy'): Promise<NotesSearchResponse> {
     await this.ensureIndexed()
 
     if (!this.stats) {
@@ -162,25 +187,131 @@ export class NoteStore extends EventEmitter {
       }
     }
 
-    const rawResults = this.searchIndex.search(trimmed, {
-      enrich: true,
-      limit: 120,
-      merge: true
-    })
-
-    const ranked = rawResults
-      .map((entry, index) => this.rankSearchResult(entry.id, index, trimmed))
-      .filter((result): result is SearchResult => result !== null)
-      .sort(
-        (left, right) => right.score - left.score || left.filename.localeCompare(right.filename)
-      )
-      .slice(0, MAX_SEARCH_RESULTS)
+    const ranked = mode === 'raw' ? await this.searchRaw(trimmed) : this.searchFuzzy(trimmed)
 
     return {
       graphPath: this.graphPath,
       stats: this.stats,
       results: ranked
     }
+  }
+
+  private searchFuzzy(trimmed: string): SearchResult[] {
+    const rawResults = this.searchIndex.search(trimmed, {
+      enrich: true,
+      limit: 120,
+      merge: true
+    })
+
+    return rawResults
+      .map((entry, index) => this.rankSearchResult(entry.id, index, trimmed))
+      .filter((result): result is SearchResult => result !== null)
+      .sort(
+        (left, right) => right.score - left.score || left.filename.localeCompare(right.filename)
+      )
+      .slice(0, MAX_SEARCH_RESULTS)
+  }
+
+  /**
+   * Bypasses FlexSearch's tokenizer entirely - a query wrapped in
+   * `/pattern/flags` is compiled as a linear-time RE2 regex (see parseRawQuery),
+   * anything else is a literal, non-normalized substring match. Runs in a
+   * worker thread against a corpus mirrored on every reindex, so this never
+   * blocks the Electron main process (see spawnSearchWorker/syncSearchWorker).
+   */
+  private async searchRaw(trimmed: string): Promise<SearchResult[]> {
+    const { pattern, isRegex, flags } = this.parseRawQuery(trimmed)
+    const matches = await this.runRawSearch(pattern, isRegex, flags)
+
+    return matches
+      .map((match, index) => this.rankRawResult(match, index))
+      .filter((result): result is SearchResult => result !== null)
+      .sort(
+        (left, right) => right.score - left.score || left.filename.localeCompare(right.filename)
+      )
+      .slice(0, MAX_SEARCH_RESULTS)
+  }
+
+  private parseRawQuery(trimmed: string): { pattern: string; isRegex: boolean; flags: string } {
+    const delimited = /^\/(.+)\/([a-z]*)$/.exec(trimmed)
+    if (delimited && /^[ims]*$/.test(delimited[2])) {
+      return { pattern: delimited[1], isRegex: true, flags: delimited[2] }
+    }
+    return { pattern: trimmed, isRegex: false, flags: '' }
+  }
+
+  private runRawSearch(
+    pattern: string,
+    isRegex: boolean,
+    flags: string
+  ): Promise<RawSearchMatch[]> {
+    return new Promise((resolve, reject) => {
+      const requestId = this.nextRawRequestId++
+      const timeout = setTimeout(() => {
+        this.pendingRawRequests.delete(requestId)
+        reject(new Error('Raw search timed out.'))
+      }, RAW_SEARCH_TIMEOUT_MS)
+
+      this.pendingRawRequests.set(requestId, { resolve, reject, timeout })
+
+      const request: RawSearchWorkerRequest = {
+        type: 'search',
+        requestId,
+        pattern,
+        isRegex,
+        flags,
+        limit: RAW_SEARCH_CANDIDATE_LIMIT
+      }
+      this.searchWorker.postMessage(request)
+    })
+  }
+
+  private spawnSearchWorker(): Worker {
+    const worker = new Worker(join(__dirname, 'search-worker.js'))
+    // Never let the worker's own liveness hold the Electron main process open.
+    worker.unref()
+    worker.on('message', (message: RawSearchWorkerResponse) => this.handleWorkerMessage(message))
+    worker.on('error', (error: Error) => this.handleWorkerFailure(error))
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        this.handleWorkerFailure(new Error(`Search worker exited with code ${code}`))
+      }
+    })
+
+    const sync: RawSearchWorkerRequest = { type: 'sync', corpus: this.rawSearchCorpus }
+    worker.postMessage(sync)
+    return worker
+  }
+
+  private syncSearchWorker(): void {
+    const sync: RawSearchWorkerRequest = { type: 'sync', corpus: this.rawSearchCorpus }
+    this.searchWorker.postMessage(sync)
+  }
+
+  private handleWorkerMessage(message: RawSearchWorkerResponse): void {
+    const pending = this.pendingRawRequests.get(message.requestId)
+    if (!pending) {
+      return
+    }
+
+    this.pendingRawRequests.delete(message.requestId)
+    clearTimeout(pending.timeout)
+
+    if (message.type === 'error') {
+      pending.reject(new Error(message.message))
+    } else {
+      pending.resolve(message.matches)
+    }
+  }
+
+  /** A crashed/hung worker fails every request in flight, then gets replaced and resynced so the next raw search isn't left permanently broken. */
+  private handleWorkerFailure(error: Error): void {
+    for (const pending of this.pendingRawRequests.values()) {
+      clearTimeout(pending.timeout)
+      pending.reject(error)
+    }
+    this.pendingRawRequests.clear()
+    this.searchWorker = this.spawnSearchWorker()
   }
 
   async openGraph(pins: PinSpec[]): Promise<NotesGraphResponse> {
@@ -492,6 +623,7 @@ export class NoteStore extends EventEmitter {
     const batchSize = 200
     let relationCount = 0
     let searchId = 1
+    const corpusEntries: RawSearchCorpusEntry[] = []
 
     for (let batchStart = 0; batchStart < dirEntries.length; batchStart += batchSize) {
       const batch = dirEntries.slice(batchStart, batchStart + batchSize)
@@ -505,18 +637,31 @@ export class NoteStore extends EventEmitter {
         relationCount += note.rels.length
         this.notes.set(note.filename, note)
 
+        const aliases = note.aliases.join(' ')
         const doc: SearchDocument = {
           id: searchId,
           filename: note.filename,
-          aliases: note.aliases.join(' '),
+          aliases,
           body: note.body
         }
 
         this.searchDocs.set(searchId, doc)
         this.searchIndex.add(doc)
         searchId += 1
+
+        // Whitespace-compacted the same way buildPreview compacts a body before
+        // slicing a preview window, so match indices the worker returns line up
+        // with the string rankRawResult/buildPreviewFromIndex actually slices.
+        corpusEntries.push({
+          filename: note.filename,
+          aliases,
+          body: note.body.replace(/\s+/g, ' ').trim()
+        })
       }
     }
+
+    this.rawSearchCorpus = corpusEntries
+    this.syncSearchWorker()
 
     await this.repairDanglingRelations()
 
@@ -664,6 +809,11 @@ export class NoteStore extends EventEmitter {
     this.stats = null
     this.status = 'empty'
     this.message = undefined
+    // Covers rebuildIndex's early-return paths (missing directory, read error,
+    // empty folder) - the success path overwrites this with the real corpus
+    // and syncs again once it's actually built.
+    this.rawSearchCorpus = []
+    this.syncSearchWorker()
   }
 
   private rankSearchResult(id: number | string, order: number, query: string): SearchResult | null {
@@ -717,6 +867,35 @@ export class NoteStore extends EventEmitter {
     }
   }
 
+  private rankRawResult(match: RawSearchMatch, order: number): SearchResult | null {
+    const note = this.notes.get(match.filename)
+    if (!note) {
+      return null
+    }
+
+    let score = 1000 - order * 5
+    let matchKind: SearchResult['match'] = match.bodyIndex !== null ? 'body' : 'alias'
+
+    if (match.aliasHit) {
+      score += 260
+      matchKind = match.bodyIndex !== null ? 'mixed' : 'alias'
+    }
+
+    if (match.bodyIndex !== null) {
+      score += 140
+    }
+
+    score += Math.min(note.degree, 24)
+
+    return {
+      filename: note.filename,
+      aliases: note.aliases,
+      preview: this.buildPreviewFromIndex(note.body, match.bodyIndex),
+      score,
+      match: matchKind
+    }
+  }
+
   private buildPreview(body: string, queryTokens: string[]): string {
     const compact = body.replace(/\s+/g, ' ').trim()
     if (!compact) {
@@ -735,6 +914,20 @@ export class NoteStore extends EventEmitter {
       return Math.min(closest, index)
     }, -1)
 
+    return this.slicePreviewAroundIndex(compact, matchIndex)
+  }
+
+  /** Preview building for raw/regex matches, which already know the exact match position rather than needing to search for a token. */
+  private buildPreviewFromIndex(body: string, matchIndex: number | null): string {
+    const compact = body.replace(/\s+/g, ' ').trim()
+    if (!compact) {
+      return 'Empty note'
+    }
+
+    return this.slicePreviewAroundIndex(compact, matchIndex ?? -1)
+  }
+
+  private slicePreviewAroundIndex(compact: string, matchIndex: number): string {
     if (matchIndex === -1) {
       return compact.slice(0, 180)
     }

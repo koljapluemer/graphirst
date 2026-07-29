@@ -4,7 +4,7 @@ import type { NotesApi } from '../shared/notes'
 
 const notesApi: NotesApi = {
   getBootstrap: () => ipcRenderer.invoke('notes:get-bootstrap'),
-  search: (query) => ipcRenderer.invoke('notes:search', query),
+  search: (query, mode) => ipcRenderer.invoke('notes:search', query, mode),
   openGraph: (pins) => ipcRenderer.invoke('notes:graph', pins),
   pickDirectory: () => ipcRenderer.invoke('notes:pick-directory'),
   refresh: () => ipcRenderer.invoke('notes:refresh'),

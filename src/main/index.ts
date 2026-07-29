@@ -12,6 +12,7 @@ import type {
   PinSpec,
   RandomOrphanRequest,
   SaveImageRequest,
+  SearchMode,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
@@ -107,8 +108,8 @@ app.whenReady().then(() => {
     return noteStore.getBootstrap()
   })
 
-  ipcMain.handle('notes:search', async (_event, query: string) => {
-    return noteStore.search(query)
+  ipcMain.handle('notes:search', async (_event, query: string, mode?: SearchMode) => {
+    return noteStore.search(query, mode)
   })
 
   ipcMain.handle('notes:graph', async (_event, pins: PinSpec[]) => {

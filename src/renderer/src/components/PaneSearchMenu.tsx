@@ -1,7 +1,8 @@
 import { LoaderCircle, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNoteSearch } from '../hooks/useNoteSearch'
-import type { SearchResult } from '../../../shared/notes'
+import SearchModeToggle from './SearchModeToggle'
+import type { SearchMode, SearchResult } from '../../../shared/notes'
 
 export interface PaneSearchMenuProps {
   /** Viewport (clientX/clientY) coordinates of the right-click that opened this menu. */
@@ -24,7 +25,8 @@ export default function PaneSearchMenu({
   onClose
 }: PaneSearchMenuProps): React.JSX.Element {
   const [query, setQuery] = useState('')
-  const { results, loading } = useNoteSearch(query)
+  const [mode, setMode] = useState<SearchMode>('fuzzy')
+  const { results, loading } = useNoteSearch(query, { mode })
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -68,6 +70,10 @@ export default function PaneSearchMenu({
           className="w-full border-0 bg-transparent text-sm outline-none placeholder:text-[#a18877]"
         />
         {loading ? <LoaderCircle className="size-4 shrink-0 animate-spin text-[#8f6f5b]" /> : null}
+        <SearchModeToggle
+          mode={mode}
+          onToggle={() => setMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy'))}
+        />
       </label>
 
       {query.trim() ? (

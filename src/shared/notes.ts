@@ -61,6 +61,14 @@ export interface SearchResult {
   match: 'alias' | 'body' | 'mixed'
 }
 
+/**
+ * 'fuzzy' is the default FlexSearch-backed token search. 'raw' bypasses
+ * tokenization entirely (literal, non-stripped substring matching) and
+ * additionally treats a query wrapped in `/pattern/flags` as a regular
+ * expression - see NoteStore.search.
+ */
+export type SearchMode = 'fuzzy' | 'raw'
+
 export interface IndexStats {
   noteCount: number
   relationCount: number
@@ -169,7 +177,7 @@ export interface UndoDeleteResponse {
 
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
-  search: (query: string) => Promise<NotesSearchResponse>
+  search: (query: string, mode?: SearchMode) => Promise<NotesSearchResponse>
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>
   refresh: () => Promise<NotesBootstrap>

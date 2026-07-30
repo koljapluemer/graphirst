@@ -13,7 +13,7 @@ import GraphCanvas from './components/GraphCanvas'
 import SearchModeToggle from './components/SearchModeToggle'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
-import type { NotesBootstrap, SearchMode } from '../../shared/notes'
+import type { IndexProgress, NotesBootstrap, SearchMode } from '../../shared/notes'
 
 function App(): React.JSX.Element {
   const [bootstrap, setBootstrap] = useState<NotesBootstrap | null>(null)
@@ -31,6 +31,7 @@ function App(): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [searchMode, setSearchMode] = useState<SearchMode>('fuzzy')
   const [bootLoading, setBootLoading] = useState(true)
+  const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -76,6 +77,10 @@ function App(): React.JSX.Element {
       ignore = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    return window.api.notes.onIndexProgress(setIndexProgress)
   }, [])
 
   const displayedError = errorMessage ?? graphError
@@ -147,11 +152,16 @@ function App(): React.JSX.Element {
   }
 
   if (bootLoading) {
+    const progressLabel =
+      indexProgress && indexProgress.total > 0
+        ? `Indexing notes… ${indexProgress.loaded.toLocaleString()} / ${indexProgress.total.toLocaleString()}`
+        : 'Indexing notes…'
+
     return (
       <div className="flex min-h-screen items-center justify-center" data-theme="autumn">
         <div className="flex items-center gap-3 rounded-full border border-[#ead8c8] bg-[rgba(255,250,245,0.92)] px-5 py-3 text-[#6f5444] shadow-lg">
           <LoaderCircle className="size-5 animate-spin" />
-          <span className="font-medium">Indexing notes…</span>
+          <span className="font-medium">{progressLabel}</span>
         </div>
       </div>
     )

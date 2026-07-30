@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { NotesApi } from '../shared/notes'
+import type { IndexProgress, NotesApi } from '../shared/notes'
 
 const notesApi: NotesApi = {
   getBootstrap: () => ipcRenderer.invoke('notes:get-bootstrap'),
@@ -21,6 +21,12 @@ const notesApi: NotesApi = {
     const listener = (): void => callback()
     ipcRenderer.on('notes:changed', listener)
     return () => ipcRenderer.removeListener('notes:changed', listener)
+  },
+  onIndexProgress: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, progress: IndexProgress): void =>
+      callback(progress)
+    ipcRenderer.on('notes:index-progress', listener)
+    return () => ipcRenderer.removeListener('notes:index-progress', listener)
   }
 }
 

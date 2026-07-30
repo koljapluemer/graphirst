@@ -16,6 +16,8 @@ export interface NoteLink {
 export interface IndexedNote {
   filename: string
   body: string
+  /** Whitespace-compacted body, computed once at index time and reused by preview building and raw/regex search instead of recompacting per query. */
+  bodyCompact: string
   aliases: string[]
   rels: NoteLink[]
   degree: number
@@ -73,6 +75,12 @@ export interface IndexStats {
   noteCount: number
   relationCount: number
   lastIndexedAt: string
+}
+
+/** Progress ticks emitted while rebuildIndex works through the note directory, so the UI can show a determinate count instead of an indefinite spinner. */
+export interface IndexProgress {
+  loaded: number
+  total: number
 }
 
 export interface NotesBootstrap {
@@ -200,4 +208,6 @@ export interface NotesApi {
    * Returns an unsubscribe function.
    */
   onChanged: (callback: () => void) => () => void
+  /** Fires repeatedly while a note index rebuild is in progress. Returns an unsubscribe function. */
+  onIndexProgress: (callback: (progress: IndexProgress) => void) => () => void
 }

@@ -14,6 +14,7 @@ import type {
   GraphEdgePayload,
   GraphNodePayload,
   IndexedNote,
+  IndexProgress,
   IndexStats,
   NoteGraph,
   NoteLink,
@@ -57,9 +58,8 @@ interface StoredSettings {
   pins?: PinSpec[]
 }
 
-interface SearchDocument extends Record<string, string | number> {
-  id: number
-  filename: string
+interface SearchDocument extends Record<string, string> {
+  id: string
   aliases: string
   body: string
 }
@@ -108,6 +108,8 @@ interface GraphBuildContext {
 
 /** Emitted whenever the note index is rebuilt - the single "notes changed" signal (see NotesApi.onChanged). */
 export const NOTES_CHANGED_EVENT = 'changed'
+/** Emitted repeatedly while rebuildIndex works through the note directory (see NotesApi.onIndexProgress). */
+export const NOTES_INDEX_PROGRESS_EVENT = 'index-progress'
 
 export class NoteStore extends EventEmitter {
   private readonly settingsPath: string
@@ -115,7 +117,6 @@ export class NoteStore extends EventEmitter {
   private lastPins: PinSpec[] = []
   private notes = new Map<string, IndexedNote>()
   private reverseRefs = new Map<string, IncomingRelation[]>()
-  private searchDocs = new Map<number, SearchDocument>()
   private searchIndex = this.createSearchIndex()
   private stats: IndexStats | null = null
   private status: NotesBootstrap['status'] = 'empty'
@@ -622,8 +623,12 @@ export class NoteStore extends EventEmitter {
 
     const batchSize = 200
     let relationCount = 0
-    let searchId = 1
     const corpusEntries: RawSearchCorpusEntry[] = []
+
+    this.emit(NOTES_INDEX_PROGRESS_EVENT, {
+      loaded: 0,
+      total: dirEntries.length
+    } satisfies IndexProgress)
 
     for (let batchStart = 0; batchStart < dirEntries.length; batchStart += batchSize) {
       const batch = dirEntries.slice(batchStart, batchStart + batchSize)
@@ -639,25 +644,26 @@ export class NoteStore extends EventEmitter {
 
         const aliases = note.aliases.join(' ')
         const doc: SearchDocument = {
-          id: searchId,
-          filename: note.filename,
+          id: note.filename,
           aliases,
           body: note.body
         }
-
-        this.searchDocs.set(searchId, doc)
         this.searchIndex.add(doc)
-        searchId += 1
 
-        // Whitespace-compacted the same way buildPreview compacts a body before
-        // slicing a preview window, so match indices the worker returns line up
-        // with the string rankRawResult/buildPreviewFromIndex actually slices.
+        // note.bodyCompact is already whitespace-compacted the same way buildPreview
+        // expects, so match indices the worker returns line up with the string
+        // rankRawResult/buildPreviewFromIndex actually slices.
         corpusEntries.push({
           filename: note.filename,
           aliases,
-          body: note.body.replace(/\s+/g, ' ').trim()
+          body: note.bodyCompact
         })
       }
+
+      this.emit(NOTES_INDEX_PROGRESS_EVENT, {
+        loaded: Math.min(batchStart + batchSize, dirEntries.length),
+        total: dirEntries.length
+      } satisfies IndexProgress)
     }
 
     this.rawSearchCorpus = corpusEntries
@@ -704,6 +710,7 @@ export class NoteStore extends EventEmitter {
       return {
         filename,
         body,
+        bodyCompact: body.replace(/\s+/g, ' ').trim(),
         aliases,
         rels,
         degree: rels.length,
@@ -804,7 +811,6 @@ export class NoteStore extends EventEmitter {
   private resetIndex(): void {
     this.notes.clear()
     this.reverseRefs.clear()
-    this.searchDocs.clear()
     this.searchIndex = this.createSearchIndex()
     this.stats = null
     this.status = 'empty'
@@ -817,20 +823,15 @@ export class NoteStore extends EventEmitter {
   }
 
   private rankSearchResult(id: number | string, order: number, query: string): SearchResult | null {
-    const doc = this.searchDocs.get(Number(id))
-    if (!doc) {
-      return null
-    }
-
-    const note = this.notes.get(doc.filename)
+    const note = this.notes.get(String(id))
     if (!note) {
       return null
     }
 
     const normalizedQuery = this.normalize(query)
     const queryTokens = this.tokenize(normalizedQuery)
-    const aliases = this.normalize(doc.aliases)
-    const body = this.normalize(doc.body)
+    const aliases = this.normalize(note.aliases.join(' '))
+    const body = this.normalize(note.body)
 
     let score = 1000 - order * 5
     let match: SearchResult['match'] = 'body'
@@ -859,9 +860,9 @@ export class NoteStore extends EventEmitter {
     score += Math.min(note.degree, 24)
 
     return {
-      filename: doc.filename,
+      filename: note.filename,
       aliases: note.aliases,
-      preview: this.buildPreview(note.body, queryTokens),
+      preview: this.buildPreview(note.bodyCompact, queryTokens),
       score,
       match
     }
@@ -890,14 +891,13 @@ export class NoteStore extends EventEmitter {
     return {
       filename: note.filename,
       aliases: note.aliases,
-      preview: this.buildPreviewFromIndex(note.body, match.bodyIndex),
+      preview: this.buildPreviewFromIndex(note.bodyCompact, match.bodyIndex),
       score,
       match: matchKind
     }
   }
 
-  private buildPreview(body: string, queryTokens: string[]): string {
-    const compact = body.replace(/\s+/g, ' ').trim()
+  private buildPreview(compact: string, queryTokens: string[]): string {
     if (!compact) {
       return 'Empty note'
     }
@@ -918,8 +918,7 @@ export class NoteStore extends EventEmitter {
   }
 
   /** Preview building for raw/regex matches, which already know the exact match position rather than needing to search for a token. */
-  private buildPreviewFromIndex(body: string, matchIndex: number | null): string {
-    const compact = body.replace(/\s+/g, ' ').trim()
+  private buildPreviewFromIndex(compact: string, matchIndex: number | null): string {
     if (!compact) {
       return 'Empty note'
     }

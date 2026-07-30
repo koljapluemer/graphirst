@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises'
 import { basename, join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { NOTES_CHANGED_EVENT, NoteStore } from './note-store'
+import { NOTES_CHANGED_EVENT, NOTES_INDEX_PROGRESS_EVENT, NoteStore } from './note-store'
 import type {
   ConnectNotesRequest,
   CreateNoteRequest,
   DeleteNoteRequest,
   DeleteRelationRequest,
+  IndexProgress,
   PinSpec,
   RandomOrphanRequest,
   SaveImageRequest,
@@ -76,6 +77,12 @@ app.whenReady().then(() => {
   noteStore.on(NOTES_CHANGED_EVENT, () => {
     for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.send('notes:changed')
+    }
+  })
+
+  noteStore.on(NOTES_INDEX_PROGRESS_EVENT, (progress: IndexProgress) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('notes:index-progress', progress)
     }
   })
 

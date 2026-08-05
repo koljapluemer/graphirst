@@ -33,6 +33,13 @@ protocol.registerSchemesAsPrivileged([
   { scheme: MEDIA_PROTOCOL, privileges: { standard: true, secure: true, supportFetchAPI: true } }
 ])
 
+// Chromium doesn't request server-side decorations on native Wayland by default,
+// so compositors like Mutter have no title bar/border to attach minimize, maximize,
+// edge-resize, or keyboard tiling to. Must be set before app 'ready'.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
+}
+
 let noteStore: NoteStore
 
 function createWindow(): void {

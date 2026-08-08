@@ -151,6 +151,7 @@ interface ViewCallbacks {
   onPinNote: (filename: string) => void
   onUnpinNote: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
+  onDeleteNoteEntry: (filename: string, index: number) => Promise<void>
 }
 
 /**
@@ -211,7 +212,8 @@ function buildView(
         onUpdateAliases: callbacks.onUpdateAliases,
         onPin: callbacks.onPinNote,
         onUnpin: callbacks.onUnpinNote,
-        onChangeDepth: callbacks.onChangeDepth
+        onChangeDepth: callbacks.onChangeDepth,
+        onDeleteNoteEntry: callbacks.onDeleteNoteEntry
       }
     }
   })
@@ -575,6 +577,13 @@ function FlowScene({
     []
   )
 
+  const handleDeleteNoteEntry = useCallback(
+    async (filename: string, index: number): Promise<void> => {
+      await window.api.notes.deleteNoteEntry({ filename, index })
+    },
+    []
+  )
+
   const handleConfirmConnection = useCallback(
     async (connecting: ConnectingInteraction, label: string): Promise<void> => {
       await window.api.notes.connectNotes({
@@ -649,7 +658,8 @@ function FlowScene({
         onDeleteRelation: handleDeleteRelation,
         onPinNote: handlePinNote,
         onUnpinNote: onUnpinNote,
-        onChangeDepth: onSetPinDepth
+        onChangeDepth: onSetPinDepth,
+        onDeleteNoteEntry: handleDeleteNoteEntry
       }),
     [
       graph,
@@ -667,7 +677,8 @@ function FlowScene({
       handleDeleteRelation,
       handlePinNote,
       onUnpinNote,
-      onSetPinDepth
+      onSetPinDepth,
+      handleDeleteNoteEntry
     ]
   )
 

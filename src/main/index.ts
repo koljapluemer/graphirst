@@ -7,11 +7,13 @@ import { NOTES_CHANGED_EVENT, NOTES_INDEX_PROGRESS_EVENT, NoteStore } from './no
 import type {
   ConnectNotesRequest,
   CreateNoteRequest,
+  DeleteNoteEntryRequest,
   DeleteNoteRequest,
   DeleteRelationRequest,
   IndexProgress,
   PinSpec,
   RandomOrphanRequest,
+  RandomWithNotesRequest,
   SaveImageRequest,
   SearchMode,
   UpdateNoteRequest,
@@ -164,6 +166,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:random-orphan', async (_event, request: RandomOrphanRequest) => {
     return noteStore.randomOrphan(request)
+  })
+
+  ipcMain.handle('notes:random-with-notes', async (_event, request: RandomWithNotesRequest) => {
+    return noteStore.randomWithNotes(request)
+  })
+
+  ipcMain.handle('notes:delete-note-entry', async (_event, request: DeleteNoteEntryRequest) => {
+    return noteStore.deleteNoteEntry(request)
   })
 
   ipcMain.handle('notes:undo-delete', async () => {

@@ -9,6 +9,7 @@ import type {
   ConnectNotesResponse,
   CreateNoteRequest,
   CreateNoteResponse,
+  DeleteNoteEntryRequest,
   DeleteNoteRequest,
   DeleteRelationRequest,
   GraphEdgePayload,
@@ -25,6 +26,8 @@ import type {
   PinSpec,
   RandomOrphanRequest,
   RandomOrphanResponse,
+  RandomWithNotesRequest,
+  RandomWithNotesResponse,
   RawNoteFile,
   SaveImageRequest,
   SaveImageResponse,
@@ -535,6 +538,52 @@ export class NoteStore extends EventEmitter {
     return { filename: candidates[Math.floor(Math.random() * candidates.length)] }
   }
 
+  async randomWithNotes(request: RandomWithNotesRequest): Promise<RandomWithNotesResponse> {
+    await this.ensureIndexed()
+
+    if (!this.stats) {
+      throw new Error(this.message ?? 'The note index is not ready yet.')
+    }
+
+    const excluded = new Set(request.exclude)
+    const candidates: string[] = []
+    for (const note of this.notes.values()) {
+      if (note.notes.length > 0 && !excluded.has(note.filename)) {
+        candidates.push(note.filename)
+      }
+    }
+
+    if (candidates.length === 0) {
+      return { filename: null }
+    }
+
+    return { filename: candidates[Math.floor(Math.random() * candidates.length)] }
+  }
+
+  async deleteNoteEntry(request: DeleteNoteEntryRequest): Promise<void> {
+    await this.ensureIndexed()
+
+    const existing = this.notes.get(request.filename)
+    if (!existing) {
+      throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
+    }
+
+    await this.mutateRawNote(request.filename, (parsed) => {
+      const notes = Array.isArray(parsed.notes) ? (parsed.notes as unknown[]) : []
+      if (request.index < 0 || request.index >= notes.length) {
+        throw new Error(`Note index ${request.index} out of range for "${request.filename}".`)
+      }
+      notes.splice(request.index, 1)
+      if (notes.length > 0) {
+        parsed.notes = notes
+      } else {
+        delete parsed.notes
+      }
+    })
+
+    await this.ensureIndexed(true)
+  }
+
   async loadSettings(): Promise<void> {
     try {
       const raw = await readFile(this.settingsPath, 'utf8')
@@ -706,6 +755,9 @@ export class NoteStore extends EventEmitter {
         ? parsed.rels.flatMap((rel) => this.normalizeRelation(rel))
         : []
       const image = typeof parsed.image === 'string' && parsed.image.trim() ? parsed.image : null
+      const notes = Array.isArray(parsed.notes)
+        ? parsed.notes.filter((entry): entry is string => typeof entry === 'string')
+        : []
 
       return {
         filename,
@@ -714,7 +766,8 @@ export class NoteStore extends EventEmitter {
         aliases,
         rels,
         degree: rels.length,
-        image
+        image,
+        notes
       }
     } catch (error) {
       console.warn(`Skipping unreadable note ${filename}:`, error)
@@ -1150,7 +1203,8 @@ export class NoteStore extends EventEmitter {
       image: note.image,
       aliases: note.aliases,
       depth: meta.depth,
-      degree: note.degree
+      degree: note.degree,
+      notes: note.notes
     }
   }
 

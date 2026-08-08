@@ -6,6 +6,8 @@ export interface RawNoteFile {
   aliases?: string[]
   /** Filename of an attached image inside the graph folder's media/ subdirectory. */
   image?: string
+  /** Freeform comments/to-dos attached to this note, rendered on the node itself. */
+  notes?: string[]
 }
 
 export interface NoteLink {
@@ -22,6 +24,7 @@ export interface IndexedNote {
   rels: NoteLink[]
   degree: number
   image: string | null
+  notes: string[]
 }
 
 export interface PinSpec {
@@ -37,6 +40,7 @@ export interface GraphNodePayload {
   /** Hops from the nearest pin that discovered this node. Informational only. */
   depth: number
   degree: number
+  notes: string[]
 }
 
 export interface GraphEdgePayload {
@@ -178,6 +182,22 @@ export interface RandomOrphanResponse {
   filename: string | null
 }
 
+export interface RandomWithNotesRequest {
+  /** Filenames to exclude from the pick, i.e. notes already open on the graph. */
+  exclude: string[]
+}
+
+export interface RandomWithNotesResponse {
+  /** Null when no note carrying a `notes` entry is available to pick. */
+  filename: string | null
+}
+
+export interface DeleteNoteEntryRequest {
+  filename: string
+  /** Index into that note's `notes` array of the entry to remove. */
+  index: number
+}
+
 export interface UndoDeleteResponse {
   /** False when there was nothing pending to undo (already restored, or superseded by a later delete). */
   restored: boolean
@@ -197,6 +217,8 @@ export interface NotesApi {
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>
   randomOrphan: (request: RandomOrphanRequest) => Promise<RandomOrphanResponse>
+  randomWithNotes: (request: RandomWithNotesRequest) => Promise<RandomWithNotesResponse>
+  deleteNoteEntry: (request: DeleteNoteEntryRequest) => Promise<void>
   /** Restores whatever `deleteNote`/`deleteRelation` most recently removed. */
   undoDelete: () => Promise<UndoDeleteResponse>
   /**

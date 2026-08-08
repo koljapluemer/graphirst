@@ -33,6 +33,9 @@ import type {
   SaveImageResponse,
   SearchMode,
   SearchResult,
+  StatsResponse,
+  StatsSample,
+  DailyStatsSnapshot,
   UndoDeleteResponse,
   UpdateNoteRequest,
   UpdateRelationRequest
@@ -59,6 +62,7 @@ const RAW_SEARCH_TIMEOUT_MS = 5000
 interface StoredSettings {
   graphPath?: string
   pins?: PinSpec[]
+  statsHistory?: Record<string, DailyStatsSnapshot[]>
 }
 
 interface SearchDocument extends Record<string, string> {
@@ -118,6 +122,7 @@ export class NoteStore extends EventEmitter {
   private readonly settingsPath: string
   private graphPath = DEFAULT_GRAPH_PATH
   private lastPins: PinSpec[] = []
+  private statsHistory: Record<string, DailyStatsSnapshot[]> = {}
   private notes = new Map<string, IndexedNote>()
   private reverseRefs = new Map<string, IncomingRelation[]>()
   private searchIndex = this.createSearchIndex()
@@ -173,6 +178,36 @@ export class NoteStore extends EventEmitter {
   async refresh(): Promise<NotesBootstrap> {
     await this.ensureIndexed(true)
     return this.getBootstrap()
+  }
+
+  async openStats(): Promise<StatsResponse> {
+    await this.ensureIndexed()
+    if (!this.stats) {
+      throw new Error(this.message ?? 'The note index is not ready yet.')
+    }
+
+    const now = new Date()
+    const sample: StatsSample = {
+      capturedAt: now.toISOString(),
+      noteCount: this.stats.noteCount,
+      relationCount: this.stats.relationCount,
+      islandCount: this.stats.islandCount,
+      orphanCount: this.stats.orphanCount
+    }
+    const date = toLocalCalendarDate(now)
+    const history = this.statsHistory[this.graphPath] ?? []
+    const today = history.find((entry) => entry.date === date)
+
+    if (today) {
+      today.last = sample
+    } else {
+      history.push({ date, first: sample, last: sample })
+      history.sort((left, right) => left.date.localeCompare(right.date))
+    }
+    this.statsHistory[this.graphPath] = history
+    await this.persistSettings()
+
+    return { current: this.stats, history }
   }
 
   async search(query: string, mode: SearchMode = 'fuzzy'): Promise<NotesSearchResponse> {
@@ -604,6 +639,10 @@ export class NoteStore extends EventEmitter {
             pin.depth >= 0
         )
       }
+
+      if (parsed.statsHistory && typeof parsed.statsHistory === 'object') {
+        this.statsHistory = parsed.statsHistory
+      }
     } catch (error) {
       const maybeError = error as NodeJS.ErrnoException
       if (maybeError.code !== 'ENOENT') {
@@ -664,6 +703,8 @@ export class NoteStore extends EventEmitter {
       this.stats = {
         noteCount: 0,
         relationCount: 0,
+        islandCount: 0,
+        orphanCount: 0,
         lastIndexedAt: new Date().toISOString()
       }
       this.hasIndexed = true
@@ -671,7 +712,6 @@ export class NoteStore extends EventEmitter {
     }
 
     const batchSize = 200
-    let relationCount = 0
     const corpusEntries: RawSearchCorpusEntry[] = []
 
     this.emit(NOTES_INDEX_PROGRESS_EVENT, {
@@ -688,7 +728,6 @@ export class NoteStore extends EventEmitter {
           continue
         }
 
-        relationCount += note.rels.length
         this.notes.set(note.filename, note)
 
         const aliases = note.aliases.join(' ')
@@ -735,7 +774,12 @@ export class NoteStore extends EventEmitter {
 
     this.stats = {
       noteCount: this.notes.size,
-      relationCount,
+      relationCount: Array.from(this.notes.values()).reduce(
+        (sum, note) => sum + note.rels.length,
+        0
+      ),
+      islandCount: this.countIslands(),
+      orphanCount: Array.from(this.notes.values()).filter((note) => note.degree === 0).length,
       lastIndexedAt: new Date().toISOString()
     }
     this.status = 'ready'
@@ -859,6 +903,35 @@ export class NoteStore extends EventEmitter {
         ]
       }
     })
+  }
+
+  /** Counts weakly connected components; a degree-zero orphan is a one-node island. */
+  private countIslands(): number {
+    const unvisited = new Set(this.notes.keys())
+    let count = 0
+
+    while (unvisited.size > 0) {
+      count += 1
+      const start = unvisited.values().next().value as string
+      const pending = [start]
+      unvisited.delete(start)
+
+      while (pending.length > 0) {
+        const filename = pending.pop() as string
+        const note = this.notes.get(filename)
+        const neighbors = [
+          ...(note?.rels.map((relation) => relation.target) ?? []),
+          ...(this.reverseRefs.get(filename)?.map((relation) => relation.source) ?? [])
+        ]
+        for (const neighbor of neighbors) {
+          if (unvisited.delete(neighbor)) {
+            pending.push(neighbor)
+          }
+        }
+      }
+    }
+
+    return count
   }
 
   private resetIndex(): void {
@@ -1311,7 +1384,8 @@ export class NoteStore extends EventEmitter {
       JSON.stringify(
         {
           graphPath: this.graphPath,
-          pins: this.lastPins
+          pins: this.lastPins,
+          statsHistory: this.statsHistory
         } satisfies StoredSettings,
         null,
         2
@@ -1319,4 +1393,11 @@ export class NoteStore extends EventEmitter {
       'utf8'
     )
   }
+}
+
+function toLocalCalendarDate(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }

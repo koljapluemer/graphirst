@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
+  ChartNoAxesCombined,
   Dices,
   FolderOpen,
   LoaderCircle,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import SearchModeToggle from './components/SearchModeToggle'
+import StatsModal from './components/StatsModal'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
 import type { IndexProgress, NotesBootstrap, SearchMode } from '../../shared/notes'
@@ -35,6 +37,7 @@ function App(): React.JSX.Element {
   const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [statsOpen, setStatsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [orphanBusy, setOrphanBusy] = useState(false)
   const [notedBusy, setNotedBusy] = useState(false)
@@ -322,6 +325,15 @@ function App(): React.JSX.Element {
               <StickyNote className={['size-2', notedBusy ? 'animate-spin' : ''].join(' ')} />
               Pin Random w/ Note
             </button>
+            <button
+              type="button"
+              className="btn ml-auto"
+              onClick={() => setStatsOpen(true)}
+              disabled={bootstrap?.status !== 'ready'}
+            >
+              <ChartNoAxesCombined className="size-3.5" />
+              Stats
+            </button>
           </div>
         </aside>
       </div>
@@ -371,6 +383,8 @@ function App(): React.JSX.Element {
           <button onClick={() => setSettingsOpen(false)}>close</button>
         </form>
       </dialog>
+
+      <StatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
     </main>
   )
 }

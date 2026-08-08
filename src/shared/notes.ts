@@ -78,7 +78,28 @@ export type SearchMode = 'fuzzy' | 'raw'
 export interface IndexStats {
   noteCount: number
   relationCount: number
+  islandCount: number
+  orphanCount: number
   lastIndexedAt: string
+}
+
+export interface StatsSample {
+  capturedAt: string
+  noteCount: number
+  relationCount: number
+  islandCount: number
+  orphanCount: number
+}
+
+export interface DailyStatsSnapshot {
+  date: string
+  first: StatsSample
+  last: StatsSample
+}
+
+export interface StatsResponse {
+  current: IndexStats
+  history: DailyStatsSnapshot[]
 }
 
 /** Progress ticks emitted while rebuildIndex works through the note directory, so the UI can show a determinate count instead of an indefinite spinner. */
@@ -209,6 +230,8 @@ export interface NotesApi {
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>
   refresh: () => Promise<NotesBootstrap>
+  /** Records today's first/last modal-open sample and returns the graph's timeline. */
+  openStats: () => Promise<StatsResponse>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
   deleteNote: (request: DeleteNoteRequest) => Promise<void>
   updateNote: (request: UpdateNoteRequest) => Promise<void>

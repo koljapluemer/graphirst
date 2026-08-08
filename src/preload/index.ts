@@ -8,6 +8,7 @@ const notesApi: NotesApi = {
   openGraph: (pins) => ipcRenderer.invoke('notes:graph', pins),
   pickDirectory: () => ipcRenderer.invoke('notes:pick-directory'),
   refresh: () => ipcRenderer.invoke('notes:refresh'),
+  openStats: () => ipcRenderer.invoke('notes:open-stats'),
   createNote: (request) => ipcRenderer.invoke('notes:create', request),
   deleteNote: (request) => ipcRenderer.invoke('notes:delete', request),
   updateNote: (request) => ipcRenderer.invoke('notes:update', request),

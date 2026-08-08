@@ -109,7 +109,7 @@ export default function FloatingEdge({
             }}
           >
             {editing ? (
-              <div className="w-56 rounded-[16px] border border-[#d6b49e] bg-[rgba(255,251,246,0.98)] p-2.5 shadow-[0_18px_40px_rgba(122,95,74,0.22)]">
+              <div className="w-56 rounded-box border border-base-300 bg-base-100 p-2.5 shadow-lg">
                 {relations.map((relation, index) => (
                   <div key={relation.id} className="mb-1.5 flex items-center gap-1.5 last:mb-0">
                     <input
@@ -128,11 +128,11 @@ export default function FloatingEdge({
                           setEditing(false)
                         }
                       }}
-                      className="w-full rounded-full border border-[#eadbc9] bg-white/80 px-2.5 py-1 text-xs outline-none focus:border-[#d6a17d]"
+                      className="input input-xs w-full rounded-full focus:border-primary/60"
                     />
                     <button
                       type="button"
-                      className="btn btn-ghost btn-xs rounded-full text-[#b3462c]"
+                      className="btn btn-ghost btn-xs rounded-full text-error"
                       onClick={() => void handleDelete(relation)}
                       title="Delete this relationship"
                     >
@@ -140,7 +140,7 @@ export default function FloatingEdge({
                     </button>
                   </div>
                 ))}
-                {error ? <p className="mb-1.5 text-[11px] text-[#b3462c]">{error}</p> : null}
+                {error ? <p className="mb-1.5 text-xs text-error">{error}</p> : null}
                 <div className="flex justify-end gap-1.5">
                   <button
                     type="button"
@@ -151,7 +151,7 @@ export default function FloatingEdge({
                   </button>
                   <button
                     type="button"
-                    className="btn btn-xs rounded-full border-[#d6b49e] bg-[#d86f49] text-white hover:bg-[#c8623d]"
+                    className="btn btn-primary btn-xs rounded-full"
                     disabled={busy}
                     onClick={() => void handleSave()}
                   >
@@ -163,7 +163,7 @@ export default function FloatingEdge({
               <button
                 type="button"
                 onClick={openEditor}
-                className="rounded-full border border-[#eadbc9] bg-[rgba(255,250,244,0.94)] px-2 py-0.5 text-[11px] font-bold text-[#6b5143] shadow-sm hover:border-[#d6a17d]"
+                className="rounded-full border border-base-300 bg-base-100/90 px-2 py-0.5 text-xs font-bold text-neutral shadow-sm hover:border-primary/50"
               >
                 {relations.map((relation) => relation.label).join(' | ')}
               </button>

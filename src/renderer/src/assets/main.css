@@ -1,179 +1,55 @@
 @import 'tailwindcss';
 @plugin "daisyui" {
-  themes: autumn --default;
+  themes: false;
 }
+
+@plugin "daisyui/theme" {
+  name: 'graphirst';
+  default: true;
+  color-scheme: light;
+  --color-base-100: #fffcf7;
+  --color-base-200: #f6f0e7;
+  --color-base-300: #e2d3c4;
+  --color-base-content: #2c1f17;
+  --color-primary: #d86f49;
+  --color-primary-content: #fff8f2;
+  --color-secondary: #0f6f6d;
+  --color-secondary-content: #eafffb;
+  --color-accent: #b3672c;
+  --color-accent-content: #fff4ea;
+  --color-neutral: #6b5143;
+  --color-neutral-content: #f6f0e7;
+  --color-info: #2f7f77;
+  --color-info-content: #eafffb;
+  --color-success: #4c8c5c;
+  --color-success-content: #eafbee;
+  --color-warning: #b3672c;
+  --color-warning-content: #fff4ea;
+  --color-error: #b3462c;
+  --color-error-content: #fff0ea;
+  --radius-selector: 999px;
+  --radius-field: 0.875rem;
+  --radius-box: 1.5rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "@tailwindcss/typography";
+
 @import '@xyflow/react/dist/style.css';
-@import './base.css';
 
-body {
-  overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(226, 239, 237, 0.85), transparent 34%),
-    radial-gradient(circle at top right, rgba(248, 214, 186, 0.92), transparent 30%),
-    linear-gradient(180deg, #f6f0e7 0%, #efe4d6 100%);
-  user-select: none;
-}
-
-#root {
-  height: 100vh;
-}
-
-button,
-input {
-  font: inherit;
-}
-
-.react-flow__renderer,
-.react-flow__viewport {
-  cursor: grab;
-}
-
-.react-flow__renderer:active,
-.react-flow__viewport:active {
-  cursor: grabbing;
-}
-
-.react-flow__node {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-  transition: transform 300ms ease;
-}
-
-.react-flow__handle {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.note-connect-handle {
-  width: 14px;
-  height: 14px;
-  background: #d36945;
-  border: 2px solid #fffaf4;
-  opacity: 0;
-  pointer-events: auto;
-  transition: opacity 120ms ease;
-}
-
-.react-flow__node:hover .note-connect-handle {
-  opacity: 0.9;
-}
-
-.react-flow__node.selectable.selected .note-card,
-.react-flow__node.selectable:focus .note-card {
-  box-shadow:
-    0 26px 60px rgba(122, 95, 74, 0.18),
-    0 0 0 2px rgba(213, 105, 69, 0.35);
-}
-
-.react-flow__edge-text {
-  font-family: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
-}
-
-.react-flow__controls,
-.react-flow__minimap {
-  border: 1px solid rgba(205, 184, 166, 0.9);
-  border-radius: 18px;
-  box-shadow: 0 12px 30px rgba(122, 95, 74, 0.08);
-  overflow: hidden;
-}
-
+/* Ties the rendered card width to the ELK layout width estimate (NODE_WIDTH
+   in GraphCanvas.tsx) - a functional constraint, not a styling choice. */
 .note-card {
   width: 370px;
 }
 
 /* Lets the edit/draft textarea grow with its content instead of scrolling
    internally - see field-sizing docs (Chromium-only, fine since this only
-   ever runs inside Electron's bundled Chromium). */
+   ever runs inside Electron's bundled Chromium). Not a Tailwind utility. */
 .note-textarea {
   field-sizing: content;
-  min-height: 9rem;
-}
-
-.note-card-center {
-  background: linear-gradient(180deg, rgba(255, 250, 244, 0.98), rgba(255, 244, 234, 0.97)), white;
-}
-
-.note-markdown {
-  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
-  font-size: 15px;
-  line-height: 1.7;
-}
-
-.note-markdown > * + * {
-  margin-top: 0.9rem;
-}
-
-.note-markdown h1,
-.note-markdown h2,
-.note-markdown h3,
-.note-markdown h4 {
-  font-family: 'IBM Plex Sans', 'Avenir Next', 'Segoe UI', sans-serif;
-  font-weight: 700;
-  line-height: 1.2;
-  margin-top: 1.2rem;
-}
-
-.note-markdown h1 {
-  font-size: 1.45rem;
-}
-
-.note-markdown h2 {
-  font-size: 1.18rem;
-}
-
-.note-markdown h3 {
-  font-size: 1rem;
-}
-
-.note-markdown ul,
-.note-markdown ol {
-  padding-left: 1.2rem;
-}
-
-.note-markdown ul {
-  list-style: disc;
-}
-
-.note-markdown ol {
-  list-style: decimal;
-}
-
-.note-markdown blockquote {
-  border-left: 3px solid rgba(180, 113, 79, 0.38);
-  padding-left: 0.9rem;
-  color: #7a6051;
-}
-
-.note-markdown code {
-  border-radius: 0.45rem;
-  background: rgba(238, 226, 213, 0.8);
-  padding: 0.12rem 0.36rem;
-  font-family: 'Berkeley Mono', 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 0.9em;
-}
-
-.note-markdown pre {
-  overflow-x: auto;
-  border-radius: 1rem;
-  background: #f0e8de;
-  padding: 0.9rem 1rem;
-}
-
-.note-markdown pre code {
-  background: transparent;
-  padding: 0;
-}
-
-.note-markdown a {
-  color: #0f6f6d;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-
-.note-markdown hr {
-  border: 0;
-  border-top: 1px solid rgba(213, 194, 177, 0.8);
 }

@@ -21,8 +21,8 @@ export default function SearchModeToggle({
       className={[
         'btn btn-ghost btn-xs nodrag shrink-0 rounded-full',
         active
-          ? 'bg-[#fff1e4] text-[#b3672c]'
-          : 'text-[#9a7964] hover:bg-[#fdeee0] hover:text-[#b3672c]'
+          ? 'bg-accent/10 text-accent'
+          : 'text-base-content/60 hover:bg-accent/10 hover:text-accent'
       ].join(' ')}
       aria-pressed={active}
       onClick={onToggle}

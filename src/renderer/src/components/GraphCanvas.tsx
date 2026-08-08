@@ -29,6 +29,7 @@ import {
   MANUAL_PIN_DEPTH,
   SEARCH_RESULT_PIN_DEPTH
 } from '../hooks/useNoteGraph'
+import { GRAPH_COLORS } from '../lib/graph-colors'
 import type { GraphEdgePayload, GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
@@ -41,6 +42,13 @@ const CONNECTION_RADIUS = 200
 const EDITING_NODE_Z_INDEX = 1000
 
 const elk = new ELK()
+
+// Resets React Flow's own default node-wrapper styling (border/shadow/padding) and
+// marks the wrapper as a hover/focus `group` so NoteNode's connect-handle dots and
+// selection ring (see NoteCard) can react to it - applied to every node kind since
+// all of them render inside a `.react-flow__node` we don't otherwise control.
+const NODE_CLASS_NAME =
+  'group border-0 bg-transparent shadow-none p-0 transition-transform duration-300 ease-in-out'
 
 const NODE_WIDTH = 370
 const NODE_MIN_HEIGHT = 220
@@ -182,7 +190,8 @@ function buildView(
       type: 'note' as const,
       position: item.position,
       width: item.width,
-      selectable: true
+      selectable: true,
+      className: NODE_CLASS_NAME
     }
 
     if (interaction.type === 'edit' && interaction.filename === item.note.filename) {
@@ -243,6 +252,7 @@ function buildView(
       position: interaction.position,
       width: NODE_WIDTH,
       selectable: true,
+      className: NODE_CLASS_NAME,
       zIndex: EDITING_NODE_Z_INDEX,
       data: {
         kind: 'draft',
@@ -262,7 +272,7 @@ function buildView(
         source: interaction.sourceFilename,
         target: interaction.clientId,
         type: 'floating',
-        style: { stroke: '#b9a68f', strokeWidth: 1.4, strokeDasharray: '4 4' }
+        style: { stroke: GRAPH_COLORS.base300, strokeWidth: 1.4, strokeDasharray: '4 4' }
       })
     }
   }
@@ -685,6 +695,7 @@ function FlowScene({
   return (
     <ReactFlow
       fitView
+      className="[&_.react-flow__renderer]:cursor-grab [&_.react-flow__renderer:active]:cursor-grabbing [&_.react-flow__viewport]:cursor-grab [&_.react-flow__viewport:active]:cursor-grabbing"
       nodeOrigin={[0.5, 0.5]}
       nodes={nodes}
       edges={edges}
@@ -698,7 +709,11 @@ function FlowScene({
       onDoubleClick={handlePaneDoubleClick}
       onPaneContextMenu={handlePaneContextMenu}
       zoomOnDoubleClick={false}
-      connectionLineStyle={{ stroke: '#d36945', strokeWidth: 1.6, strokeDasharray: '4 4' }}
+      connectionLineStyle={{
+        stroke: GRAPH_COLORS.primary,
+        strokeWidth: 1.6,
+        strokeDasharray: '4 4'
+      }}
       minZoom={0.02}
       maxZoom={1.5}
       panOnScroll
@@ -710,22 +725,22 @@ function FlowScene({
         zIndex: 0
       }}
     >
-      <Background gap={28} color="#eadfce" />
+      <Background gap={28} color={GRAPH_COLORS.base300} />
       <Controls showInteractive={false} />
       {graph.nodes.length === 0 && interaction.type === 'idle' ? (
         <Panel position="top-center">
-          <div className="pointer-events-none rounded-full border border-[#e2d3c4] bg-[rgba(255,252,247,0.92)] px-4 py-2 text-sm text-[#715748] shadow-[0_18px_40px_rgba(122,95,74,0.12)]">
+          <div className="pointer-events-none rounded-full border border-base-300 bg-base-100/90 px-4 py-2 text-sm text-base-content/70 shadow-lg">
             Search for a note to pin it.
           </div>
         </Panel>
       ) : null}
       {undoAction ? (
         <Panel position="bottom-center">
-          <div className="flex items-center gap-3 rounded-full border border-[#e2d3c4] bg-[rgba(255,252,247,0.98)] px-4 py-2 text-sm text-[#4a382c] shadow-[0_18px_40px_rgba(122,95,74,0.22)]">
+          <div className="flex items-center gap-3 rounded-full border border-base-300 bg-base-100 px-4 py-2 text-sm shadow-lg">
             <span>{undoAction.message}</span>
             <button
               type="button"
-              className="btn btn-ghost btn-xs rounded-full text-[#b3672c]"
+              className="btn btn-ghost btn-xs rounded-full text-accent"
               onClick={handleUndo}
             >
               Undo
@@ -755,16 +770,16 @@ export default function GraphCanvas({
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph) {
     return (
-      <div className="flex h-full items-center justify-center rounded-[24px] border border-dashed border-[#dfceb9] bg-[rgba(255,251,246,0.72)] text-sm text-[#715748] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+      <div className="flex h-full items-center justify-center rounded-box border border-dashed border-base-300 bg-base-100/70 text-sm text-base-content/70">
         Search for a note to pin it.
       </div>
     )
   }
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden rounded-[24px] border border-[#e2d4c4] bg-[linear-gradient(180deg,rgba(255,252,247,0.94),rgba(247,239,230,0.9))] shadow-[0_32px_80px_rgba(122,95,74,0.12)]">
+    <div className="relative h-full min-h-0 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-xl">
       {loading ? (
-        <div className="pointer-events-none absolute inset-0 z-20 bg-[rgba(255,250,245,0.6)] backdrop-blur-[1px]" />
+        <div className="pointer-events-none absolute inset-0 z-20 bg-base-100/60 backdrop-blur-sm" />
       ) : null}
       <ReactFlowProvider>
         <FlowScene
@@ -920,7 +935,7 @@ function edgeVisualWeight(edge: GraphEdgePayload): { strokeWidth: number; opacit
 }
 
 function buildDirectedEdge(edge: GraphEdgePayload): Edge {
-  const color = edge.direction === 'outgoing' ? '#2f7f77' : '#b6633d'
+  const color = edge.direction === 'outgoing' ? GRAPH_COLORS.secondary : GRAPH_COLORS.accent
 
   return {
     id: edge.id,
@@ -950,7 +965,7 @@ function buildReciprocalEdge(
   const posB = positions.get(b.source) ?? { x: 0, y: 0 }
   const aGoesFirst = posA.x - posB.x || posA.y - posB.y
   const [first, second] = aGoesFirst <= 0 ? [a, b] : [b, a]
-  const color = '#6b5143'
+  const color = GRAPH_COLORS.neutral
 
   return {
     id: `${first.id}__reciprocal__${second.id}`,

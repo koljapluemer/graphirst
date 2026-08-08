@@ -48,12 +48,12 @@ export default function PaneSearchMenu({
   return (
     <div
       ref={rootRef}
-      className="nodrag nopan nowheel fixed z-50 w-72 rounded-[20px] border border-[#e2d3c4] bg-[rgba(255,252,247,0.98)] p-3 shadow-[0_24px_60px_rgba(122,95,74,0.22)]"
+      className="nodrag nopan nowheel fixed z-50 w-72 rounded-box border border-base-300 bg-base-100 p-3 shadow-xl"
       style={{ left: screenPosition.x, top: screenPosition.y }}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <label className="flex items-center gap-2 rounded-[14px] border border-[#e8d9ca] bg-white/85 px-3 py-2">
-        <Search className="size-4 shrink-0 text-[#9a7964]" />
+      <label className="input w-full">
+        <Search className="size-4 shrink-0 text-base-content/60" />
         <input
           ref={inputRef}
           value={query}
@@ -67,9 +67,10 @@ export default function PaneSearchMenu({
             }
           }}
           placeholder="Open a note here…"
-          className="w-full border-0 bg-transparent text-sm outline-none placeholder:text-[#a18877]"
         />
-        {loading ? <LoaderCircle className="size-4 shrink-0 animate-spin text-[#8f6f5b]" /> : null}
+        {loading ? (
+          <LoaderCircle className="size-4 shrink-0 animate-spin text-base-content/60" />
+        ) : null}
         <SearchModeToggle
           mode={mode}
           onToggle={() => setMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy'))}
@@ -79,7 +80,7 @@ export default function PaneSearchMenu({
       {query.trim() ? (
         <div className="mt-2 max-h-64 space-y-1 overflow-y-auto">
           {results.length === 0 && !loading ? (
-            <p className="px-2 py-1.5 text-xs text-[#7a6051]">No matches.</p>
+            <p className="px-2 py-1.5 text-xs text-base-content/60">No matches.</p>
           ) : null}
           {results.map((result: SearchResult) => {
             const isOpen = pins.has(result.filename)
@@ -88,10 +89,10 @@ export default function PaneSearchMenu({
                 key={result.filename}
                 type="button"
                 className={[
-                  'block w-full rounded-[12px] border px-3 py-2 text-left text-xs leading-5 transition-colors',
+                  'block w-full rounded-field border px-3 py-2 text-left text-xs leading-5 transition-colors',
                   isOpen
-                    ? 'border-[#da8760] bg-[#fff1e4] text-[#7c4c33]'
-                    : 'border-transparent bg-[rgba(252,248,242,0.82)] text-[#2f2219] hover:border-[#e8d7c8] hover:bg-white'
+                    ? 'border-primary/50 bg-primary/10'
+                    : 'border-transparent bg-base-200/70 hover:border-base-300 hover:bg-base-100'
                 ].join(' ')}
                 onClick={() => onSelectNote(result.filename)}
               >

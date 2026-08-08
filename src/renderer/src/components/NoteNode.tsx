@@ -43,7 +43,7 @@ export type NoteFlowNode = Node<NoteNodeData, 'note'>
 
 const CONNECT_HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left]
 
-export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.Element {
+export default function NoteNode({ data, selected }: NodeProps<NoteFlowNode>): React.JSX.Element {
   return (
     <>
       {/*
@@ -59,6 +59,7 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
       <Handle
         type="target"
         position={Position.Top}
+        className="opacity-0 pointer-events-none"
         style={{ top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }}
       />
 
@@ -66,9 +67,10 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
         Always mounted, regardless of kind - React Flow derives edge geometry from
         handle bounds even for a custom edge type that recomputes its own path
         (see FloatingEdge/getEdgeParams), so unmounting these while editing/drafting
-        would drop that node's outgoing edges. Hide non-'note' kinds visually via the
-        base .react-flow__handle rule (opacity:0, pointer-events:none) instead of
-        removing them from the DOM - see https://reactflow.dev/learn/customization/handles.
+        would drop that node's outgoing edges. Hidden by default (opacity-0
+        pointer-events-none); 'note' kind additionally reveals a small dot on
+        hover of the node (`group` class set on the node wrapper in GraphCanvas'
+        buildView) - see https://reactflow.dev/learn/customization/handles.
       */}
       {CONNECT_HANDLE_POSITIONS.map((position) => (
         <Handle
@@ -76,7 +78,11 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
           id={position}
           type="source"
           position={position}
-          className={data.kind === 'note' ? 'note-connect-handle' : undefined}
+          className={
+            data.kind === 'note'
+              ? 'size-3.5 rounded-full border-2 border-base-100 bg-primary opacity-0 pointer-events-none transition-opacity group-hover:opacity-90 group-hover:pointer-events-auto'
+              : 'opacity-0 pointer-events-none'
+          }
         />
       ))}
 
@@ -85,6 +91,7 @@ export default function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.E
           note={data.note}
           pinDepth={data.pinDepth}
           isAnchor={data.isAnchor}
+          selected={selected}
           onDelete={data.onDelete}
           onEdit={data.onEdit}
           onUpdateAliases={data.onUpdateAliases}

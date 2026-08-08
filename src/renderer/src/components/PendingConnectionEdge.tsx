@@ -8,6 +8,7 @@ import {
 import { X } from 'lucide-react'
 import { useState } from 'react'
 import { EDGE_OVERLAY_Z_INDEX, getEdgeParams } from './graph-edge-geometry'
+import { GRAPH_COLORS } from '../lib/graph-colors'
 
 export interface PendingConnectionEdgeData extends Record<string, unknown> {
   onConfirm: (label: string) => Promise<void>
@@ -61,7 +62,7 @@ export default function PendingConnectionEdge({
     <>
       <BaseEdge
         path={path}
-        style={{ stroke: '#d36945', strokeWidth: 1.6, strokeDasharray: '4 4' }}
+        style={{ stroke: GRAPH_COLORS.primary, strokeWidth: 1.6, strokeDasharray: '4 4' }}
       />
       <EdgeLabelRenderer>
         <div
@@ -74,7 +75,7 @@ export default function PendingConnectionEdge({
           }}
         >
           <form
-            className="flex flex-col gap-1.5 rounded-[16px] border border-[#d6b49e] bg-[rgba(255,251,246,0.98)] p-2 shadow-[0_18px_40px_rgba(122,95,74,0.22)]"
+            className="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
             onSubmit={(event) => {
               event.preventDefault()
               void handleConfirm()
@@ -92,11 +93,11 @@ export default function PendingConnectionEdge({
                   }
                 }}
                 placeholder="relation label"
-                className="w-32 rounded-full border border-[#eadbc9] bg-white/80 px-2.5 py-1 text-xs outline-none focus:border-[#d6a17d]"
+                className="input input-xs w-32 rounded-full focus:border-primary/60"
               />
               <button
                 type="submit"
-                className="btn btn-xs rounded-full border-[#d6b49e] bg-[#d86f49] text-white hover:bg-[#c8623d]"
+                className="btn btn-primary btn-xs rounded-full"
                 disabled={!label.trim() || busy}
               >
                 Connect
@@ -109,7 +110,7 @@ export default function PendingConnectionEdge({
                 <X className="size-3.5" />
               </button>
             </div>
-            {error ? <p className="text-[11px] text-[#b3462c]">{error}</p> : null}
+            {error ? <p className="text-xs text-error">{error}</p> : null}
           </form>
         </div>
       </EdgeLabelRenderer>

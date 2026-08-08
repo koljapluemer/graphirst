@@ -15,7 +15,7 @@ export default function PinControl({
     return (
       <button
         type="button"
-        className="btn btn-ghost btn-xs nodrag rounded-full text-[#7c5b48] hover:bg-[#fdeee0] hover:text-[#b3672c]"
+        className="btn btn-ghost btn-xs nodrag rounded-full hover:bg-accent/10 hover:text-accent"
         onClick={(event) => {
           event.stopPropagation()
           onPin()
@@ -31,7 +31,7 @@ export default function PinControl({
     <div className="nodrag flex items-center gap-0.5">
       <button
         type="button"
-        className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] disabled:opacity-30"
+        className="btn btn-ghost btn-xs rounded-full disabled:opacity-30"
         onClick={(event) => {
           event.stopPropagation()
           onChangeDepth(pinDepth - 1)
@@ -43,7 +43,7 @@ export default function PinControl({
       </button>
       <button
         type="button"
-        className="btn btn-ghost btn-xs gap-1 rounded-full text-[#b3672c]"
+        className="btn btn-ghost btn-xs gap-1 rounded-full text-accent"
         onClick={(event) => {
           event.stopPropagation()
           onUnpin()
@@ -55,7 +55,7 @@ export default function PinControl({
       </button>
       <button
         type="button"
-        className="btn btn-ghost btn-xs rounded-full text-[#7c5b48]"
+        className="btn btn-ghost btn-xs rounded-full"
         onClick={(event) => {
           event.stopPropagation()
           onChangeDepth(pinDepth + 1)

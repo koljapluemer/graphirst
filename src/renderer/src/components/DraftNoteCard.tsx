@@ -105,14 +105,14 @@ export default function DraftNoteCard({
     image?.status === 'existing' ? `media://${image.filename}` : (image?.dataUrl ?? null)
 
   return (
-    <article className="note-card rounded-[24px] border border-dashed border-[#d6b49e] bg-[rgba(255,251,246,0.98)] px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)]">
+    <article className="note-card group-focus:ring-2 group-focus:ring-primary/40 rounded-box border border-dashed border-primary/50 bg-base-100 px-5 py-4 text-left shadow-xl">
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-[#a3806a]">
+        <span className="text-xs font-semibold uppercase tracking-wide text-base-content/60">
           {mode === 'edit' ? 'Edit note' : 'New note'}
         </span>
         <button
           type="button"
-          className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
+          className="btn btn-ghost btn-xs rounded-full"
           onClick={onCancel}
           title="Discard"
         >
@@ -122,10 +122,10 @@ export default function DraftNoteCard({
 
       {imagePreviewSrc ? (
         <div className="nodrag relative mb-3">
-          <img src={imagePreviewSrc} alt="" className="h-auto w-full rounded-[14px]" />
+          <img src={imagePreviewSrc} alt="" className="h-auto w-full rounded-box" />
           <button
             type="button"
-            className="btn btn-ghost btn-xs absolute right-1.5 top-1.5 rounded-full bg-[rgba(255,251,246,0.9)] text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c]"
+            className="btn btn-ghost btn-xs absolute right-1.5 top-1.5 rounded-full bg-base-100/90 hover:bg-error/10 hover:text-error"
             onClick={() => setImage(null)}
             title="Remove image"
           >
@@ -136,7 +136,7 @@ export default function DraftNoteCard({
 
       <textarea
         ref={textareaRef}
-        className="note-textarea nodrag nowheel w-full resize-none rounded-[14px] border border-[#eadbc9] bg-white/70 px-3 py-2 text-sm leading-6 text-[#352921] outline-none focus:border-[#d6a17d]"
+        className="note-textarea textarea nodrag nowheel min-h-36 w-full resize-none text-sm leading-6 focus:border-primary/60"
         placeholder="Write the note… (paste an image to attach it)"
         value={body}
         onChange={(event) => setBody(event.target.value)}
@@ -153,10 +153,10 @@ export default function DraftNoteCard({
 
       {showRelation ? (
         <>
-          <label className="nodrag mt-3 block text-xs text-[#6b5143]">
-            <span className="mb-1 block text-[#8b6f5d]">Relation label</span>
+          <label className="nodrag mt-3 block text-xs text-base-content/70">
+            <span className="mb-1 block text-base-content/50">Relation label</span>
             <input
-              className="w-full rounded-[10px] border border-[#eadbc9] bg-white/70 px-2 py-1.5 text-sm outline-none focus:border-[#d6a17d]"
+              className="input input-sm w-full focus:border-primary/60"
               value={label}
               onChange={(event) => setLabel(event.target.value)}
               onKeyDown={handleFieldEscape}
@@ -164,7 +164,7 @@ export default function DraftNoteCard({
             />
           </label>
 
-          <label className="nodrag mt-2 flex items-center gap-2 text-xs text-[#6b5143]">
+          <label className="nodrag mt-2 flex items-center gap-2 text-xs text-base-content/70">
             <input
               type="checkbox"
               className="checkbox checkbox-xs"
@@ -177,7 +177,7 @@ export default function DraftNoteCard({
         </>
       ) : null}
 
-      {error ? <p className="mt-2 text-xs text-[#b3462c]">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-error">{error}</p> : null}
 
       <div className="nodrag mt-3 flex justify-end gap-2">
         <button type="button" className="btn btn-ghost btn-xs rounded-full" onClick={onCancel}>
@@ -185,7 +185,7 @@ export default function DraftNoteCard({
         </button>
         <button
           type="button"
-          className="btn btn-xs rounded-full border-[#d6b49e] bg-[#d86f49] text-white hover:bg-[#c8623d]"
+          className="btn btn-primary btn-xs rounded-full"
           disabled={!body.trim() || saving}
           onClick={() => void handleSave()}
         >

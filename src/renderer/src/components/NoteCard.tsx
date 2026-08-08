@@ -10,6 +10,7 @@ export default function NoteCard({
   note,
   pinDepth,
   isAnchor,
+  selected,
   onDelete,
   onEdit,
   onUpdateAliases,
@@ -21,6 +22,8 @@ export default function NoteCard({
   note: GraphNodePayload
   pinDepth: number | null
   isAnchor: boolean
+  /** Whether React Flow currently has this node selected - drives the highlight ring. */
+  selected: boolean
   onDelete: (filename: string) => Promise<void>
   onEdit: (filename: string) => void
   onUpdateAliases: (
@@ -53,11 +56,11 @@ export default function NoteCard({
   return (
     <article
       className={[
-        'note-card',
-        'rounded-[24px] border px-5 py-4 text-left shadow-[0_22px_50px_rgba(123,94,74,0.12)]',
-        pinDepth !== null ? 'note-card-center border-[#d36945]' : 'border-[#eadbc9]',
+        'note-card group-focus:ring-2 group-focus:ring-primary/40',
+        'rounded-box border bg-base-100 px-5 py-4 text-left shadow-xl',
+        pinDepth !== null ? 'border-primary' : 'border-base-300',
         isAnchor ? 'border-dashed' : '',
-        'bg-[rgba(255,251,246,0.96)]'
+        selected ? 'ring-2 ring-primary/40' : ''
       ].join(' ')}
     >
       <div className="mb-3 flex min-h-6 items-center justify-between">
@@ -70,7 +73,7 @@ export default function NoteCard({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] hover:bg-[#f3e8da]"
+            className="btn btn-ghost btn-xs rounded-full"
             onClick={(event) => {
               event.stopPropagation()
               onEdit(note.filename)
@@ -92,7 +95,7 @@ export default function NoteCard({
           </button>
           <button
             type="button"
-            className="btn btn-ghost btn-xs rounded-full text-[#7c5b48] hover:bg-[#fbdede] hover:text-[#b3462c] disabled:opacity-50"
+            className="btn btn-ghost btn-xs rounded-full hover:bg-error/10 hover:text-error disabled:opacity-50"
             onClick={(event) => {
               event.stopPropagation()
               void handleDelete()
@@ -105,13 +108,13 @@ export default function NoteCard({
         </div>
       </div>
 
-      {error ? <p className="mb-2 text-xs text-[#b3462c]">{error}</p> : null}
+      {error ? <p className="mb-2 text-xs text-error">{error}</p> : null}
 
       {note.image ? (
-        <img src={`media://${note.image}`} alt="" className="mb-3 h-auto w-full rounded-[14px]" />
+        <img src={`media://${note.image}`} alt="" className="mb-3 h-auto w-full rounded-box" />
       ) : null}
 
-      <div className="note-markdown text-[#352921]">
+      <div className="prose prose-sm max-w-none prose-code:before:content-none prose-code:after:content-none">
         {note.body.trim() ? (
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
@@ -132,7 +135,7 @@ export default function NoteCard({
             {note.body}
           </ReactMarkdown>
         ) : (
-          <p className="italic text-[#8b6f5d]">Empty note</p>
+          <p className="italic text-base-content/50">Empty note</p>
         )}
       </div>
 
@@ -141,12 +144,12 @@ export default function NoteCard({
           {note.notes.map((entry, index) => (
             <div
               key={index}
-              className="flex items-start justify-between gap-2 rounded-[14px] border border-[#f0b8a8] bg-[#fdeae4] px-3 py-2 text-sm text-[#7c2f1c]"
+              className="flex items-start justify-between gap-2 rounded-box border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent"
             >
               <p className="whitespace-pre-wrap">{entry}</p>
               <button
                 type="button"
-                className="btn btn-ghost btn-xs shrink-0 rounded-full text-[#7c2f1c] hover:bg-[#f8d4c8]"
+                className="btn btn-ghost btn-xs shrink-0 rounded-full text-accent hover:bg-accent/20"
                 onClick={(event) => {
                   event.stopPropagation()
                   void onDeleteNoteEntry(note.filename, index)

@@ -7,6 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent
 } from 'react'
 import { compressImage } from '../lib/compress-image'
+import { mediaUrl } from '../lib/media'
 
 /**
  * One attached image, one per note. `existing` carries the filename already on
@@ -100,7 +101,7 @@ export default function DraftNoteCard({
   }
 
   const imagePreviewSrc =
-    image?.status === 'existing' ? `media://${image.filename}` : (image?.dataUrl ?? null)
+    image?.status === 'existing' ? mediaUrl(image.filename) : (image?.dataUrl ?? null)
 
   return (
     <article className="note-card group-focus:ring-2 group-focus:ring-primary/40 rounded-box border border-dashed border-primary/50 bg-base-100 px-5 py-4 text-left shadow-xl">

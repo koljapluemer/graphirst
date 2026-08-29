@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import AliasEditorModal from './AliasEditorModal'
 import ExtraContentModal from './ExtraContentModal'
 import PinControl from './PinControl'
+import { mediaUrl } from '../lib/media'
 import type { GraphNodePayload } from '../../../shared/notes'
 
 export default function NoteCard({
@@ -122,7 +123,7 @@ export default function NoteCard({
       {error ? <p className="mb-2 text-xs text-error">{error}</p> : null}
 
       {note.image ? (
-        <img src={`media://${note.image}`} alt="" className="mb-3 h-auto w-full rounded-box" />
+        <img src={mediaUrl(note.image)} alt="" className="mb-3 h-auto w-full rounded-box" />
       ) : null}
 
       <div className="prose prose-sm max-w-none prose-code:before:content-none prose-code:after:content-none">

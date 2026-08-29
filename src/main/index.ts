@@ -103,9 +103,12 @@ app.whenReady().then(() => {
 
   // Serves note-attached images straight out of <graphPath>/images - reads the graph
   // path fresh on every request (rather than capturing it once) since it can change
-  // at runtime via pickDirectory/setGraphPath.
+  // at runtime via pickDirectory/setGraphPath. The filename rides in the URL path,
+  // not the authority: image files inherit their note's filename stem, which is
+  // routinely not a valid URL host (leading `-`, spaces, uppercase, …). basename
+  // also collapses any `../` traversal the path might carry.
   protocol.handle(MEDIA_PROTOCOL, async (request) => {
-    const filename = basename(decodeURIComponent(new URL(request.url).hostname))
+    const filename = basename(decodeURIComponent(new URL(request.url).pathname))
     const extension = filename.split('.').pop()?.toLowerCase() ?? ''
     const mimeType = MEDIA_MIME_TYPES[extension]
 

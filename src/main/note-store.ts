@@ -5,6 +5,9 @@ import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { Document } from 'flexsearch'
 import type {
+  AttachImageRequest,
+  AttachImageResponse,
+  ClearImageRequest,
   ConnectNotesRequest,
   ConnectNotesResponse,
   CreateNoteRequest,
@@ -29,8 +32,6 @@ import type {
   RandomWithNotesRequest,
   RandomWithNotesResponse,
   RawNoteFile,
-  SaveImageRequest,
-  SaveImageResponse,
   SearchMode,
   SearchResult,
   StatsResponse,
@@ -49,7 +50,16 @@ import type {
 
 const DEFAULT_GRAPH_PATH = '/home/brokkoli/Sync/Graph'
 const SETTINGS_FILE_NAME = 'graphirst-settings.json'
-const MEDIA_DIR_NAME = 'media'
+/**
+ * Loose image files live here, matched to a note by filename stem
+ * (`<noteStem>-<epochMillis><ext>`, newest timestamp wins) with no reference in
+ * the note JSON. Same layout the sibling `../note` app uses, so an image
+ * attached in either app shows in both.
+ */
+const IMAGES_DIR_NAME = 'images'
+const SUPPORTED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'])
+/** basename-without-extension of an image file: `<stem>-<digits>`. */
+const IMAGE_STEM_PATTERN = /^(.+)-(\d+)$/
 const MAX_SEARCH_RESULTS = 40
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
@@ -96,6 +106,7 @@ interface RelationDraft {
 }
 
 interface PendingNoteImage {
+  /** The exact `images/` filename to restore the bytes under on undo. */
   filename: string
   data: Buffer
 }
@@ -124,6 +135,8 @@ export class NoteStore extends EventEmitter {
   private lastPins: PinSpec[] = []
   private statsHistory: Record<string, DailyStatsSnapshot[]> = {}
   private notes = new Map<string, IndexedNote>()
+  /** noteStem -> newest matching filename in `images/`, rebuilt from a single directory scan each index. */
+  private imagesByStem = new Map<string, string>()
   private reverseRefs = new Map<string, IncomingRelation[]>()
   private searchIndex = this.createSearchIndex()
   private stats: IndexStats | null = null
@@ -380,7 +393,7 @@ export class NoteStore extends EventEmitter {
     const filename = this.generateFilename()
 
     if (!request.relatedFilename) {
-      await this.writeNoteFile(filename, { body: request.body, rels: [], image: request.image })
+      await this.writeNoteFile(filename, { body: request.body, rels: [] })
       await this.ensureIndexed(true)
       return { filename }
     }
@@ -390,11 +403,10 @@ export class NoteStore extends EventEmitter {
     if (request.reverse) {
       await this.writeNoteFile(filename, {
         body: request.body,
-        rels: [[label, request.relatedFilename]],
-        image: request.image
+        rels: [[label, request.relatedFilename]]
       })
     } else {
-      await this.writeNoteFile(filename, { body: request.body, rels: [], image: request.image })
+      await this.writeNoteFile(filename, { body: request.body, rels: [] })
       await this.appendRelation(request.relatedFilename, [label, filename])
     }
 
@@ -420,7 +432,7 @@ export class NoteStore extends EventEmitter {
     let image: PendingNoteImage | null = null
     if (existing.image) {
       try {
-        const data = await readFile(this.mediaFilePath(existing.image))
+        const data = await readFile(this.imageFilePath(existing.image))
         image = { filename: existing.image, data }
       } catch (error) {
         const maybeError = error as NodeJS.ErrnoException
@@ -428,7 +440,7 @@ export class NoteStore extends EventEmitter {
           throw error
         }
       }
-      await this.deleteMediaFile(existing.image)
+      await this.deleteImageFiles(this.stemOf(request.filename))
     }
 
     await unlink(path)
@@ -446,26 +458,33 @@ export class NoteStore extends EventEmitter {
 
     await this.mutateRawNote(request.filename, (parsed) => {
       parsed.body = request.body
-      if (request.image) {
-        parsed.image = request.image
-      } else {
-        delete parsed.image
-      }
       if (request.aliases.length > 0) {
         parsed.aliases = request.aliases
       } else {
         delete parsed.aliases
       }
+      if (request.extraContent.trim().length > 0) {
+        parsed.extra = request.extraContent
+      } else {
+        delete parsed.extra
+      }
     })
-
-    if (existing.image && existing.image !== request.image) {
-      await this.deleteMediaFile(existing.image)
-    }
 
     await this.ensureIndexed(true)
   }
 
-  async saveImage(request: SaveImageRequest): Promise<SaveImageResponse> {
+  /**
+   * Writes `dataUrl`'s bytes to `images/<noteStem>-<epochMillis><ext>`, replacing
+   * any image already attached to that note. The note JSON is untouched - the
+   * link is by filename stem (see `../note`).
+   */
+  async attachImage(request: AttachImageRequest): Promise<AttachImageResponse> {
+    await this.ensureIndexed()
+
+    if (!this.notes.has(request.filename)) {
+      throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
+    }
+
     const match = /^data:image\/(\w+);base64,(.+)$/.exec(request.dataUrl)
     if (!match) {
       throw new Error('Unsupported image data.')
@@ -473,12 +492,31 @@ export class NoteStore extends EventEmitter {
 
     const [, subtype, base64] = match
     const extension = subtype === 'jpeg' ? 'jpg' : subtype
-    const filename = `image-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${extension}`
+    if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) {
+      throw new Error(`Unsupported image type: ${extension}.`)
+    }
 
-    await mkdir(this.mediaDir(), { recursive: true })
-    await writeFile(this.mediaFilePath(filename), Buffer.from(base64, 'base64'))
+    const stem = this.stemOf(request.filename)
+    await this.deleteImageFiles(stem)
 
-    return { filename }
+    const image = `${stem}-${Date.now()}.${extension}`
+    await mkdir(this.imagesDir(), { recursive: true })
+    await writeFile(this.imageFilePath(image), Buffer.from(base64, 'base64'))
+
+    await this.ensureIndexed(true)
+    return { image }
+  }
+
+  /** Removes whatever image is attached to the note (its `images/` file[s]); no-op if none. */
+  async clearImage(request: ClearImageRequest): Promise<void> {
+    await this.ensureIndexed()
+
+    if (!this.notes.has(request.filename)) {
+      throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
+    }
+
+    await this.deleteImageFiles(this.stemOf(request.filename))
+    await this.ensureIndexed(true)
   }
 
   async connectNotes(request: ConnectNotesRequest): Promise<ConnectNotesResponse> {
@@ -540,8 +578,8 @@ export class NoteStore extends EventEmitter {
     if (pending.type === 'note') {
       await writeFile(join(this.graphPath, pending.filename), pending.raw, 'utf8')
       if (pending.image) {
-        await mkdir(this.mediaDir(), { recursive: true })
-        await writeFile(this.mediaFilePath(pending.image.filename), pending.image.data)
+        await mkdir(this.imagesDir(), { recursive: true })
+        await writeFile(this.imageFilePath(pending.image.filename), pending.image.data)
       }
     } else {
       await this.appendRelation(pending.source, pending.relation)
@@ -711,6 +749,9 @@ export class NoteStore extends EventEmitter {
       return
     }
 
+    // Populated before notes are read - readNoteFile resolves each note's image from here.
+    await this.scanImages()
+
     const batchSize = 200
     const corpusEntries: RawSearchCorpusEntry[] = []
 
@@ -798,7 +839,8 @@ export class NoteStore extends EventEmitter {
       const rels = Array.isArray(parsed.rels)
         ? parsed.rels.flatMap((rel) => this.normalizeRelation(rel))
         : []
-      const image = typeof parsed.image === 'string' && parsed.image.trim() ? parsed.image : null
+      const image = this.imagesByStem.get(this.stemOf(filename)) ?? null
+      const extraContent = typeof parsed.extra === 'string' ? parsed.extra : ''
       const notes = Array.isArray(parsed.notes)
         ? parsed.notes.filter((entry): entry is string => typeof entry === 'string')
         : []
@@ -811,6 +853,7 @@ export class NoteStore extends EventEmitter {
         rels,
         degree: rels.length,
         image,
+        extraContent,
         notes
       }
     } catch (error) {
@@ -936,6 +979,7 @@ export class NoteStore extends EventEmitter {
 
   private resetIndex(): void {
     this.notes.clear()
+    this.imagesByStem.clear()
     this.reverseRefs.clear()
     this.searchIndex = this.createSearchIndex()
     this.stats = null
@@ -1275,6 +1319,7 @@ export class NoteStore extends EventEmitter {
       body: note.body,
       image: note.image,
       aliases: note.aliases,
+      extraContent: note.extraContent,
       depth: meta.depth,
       degree: note.degree,
       notes: note.notes
@@ -1317,12 +1362,9 @@ export class NoteStore extends EventEmitter {
 
   private async writeNoteFile(
     filename: string,
-    data: { body: string; rels: NoteRelationTuple[]; image?: string }
+    data: { body: string; rels: NoteRelationTuple[] }
   ): Promise<void> {
     const payload: RawNoteFile = { body: data.body, rels: data.rels }
-    if (data.image) {
-      payload.image = data.image
-    }
     await writeFile(join(this.graphPath, filename), JSON.stringify(payload, null, 2), 'utf8')
   }
 
@@ -1357,23 +1399,74 @@ export class NoteStore extends EventEmitter {
     })
   }
 
-  private mediaDir(): string {
-    return join(this.graphPath, MEDIA_DIR_NAME)
+  private imagesDir(): string {
+    return join(this.graphPath, IMAGES_DIR_NAME)
   }
 
-  private mediaFilePath(filename: string): string {
-    return join(this.mediaDir(), filename)
+  private imageFilePath(filename: string): string {
+    return join(this.imagesDir(), filename)
   }
 
-  private async deleteMediaFile(filename: string): Promise<void> {
+  /** `foo.json` -> `foo`. The stem an image filename must be prefixed with to belong to this note. */
+  private stemOf(noteFilename: string): string {
+    return noteFilename.replace(/\.json$/, '')
+  }
+
+  /** Lists `images/` (empty when the folder is absent). */
+  private async listImageDir(): Promise<string[]> {
     try {
-      await unlink(this.mediaFilePath(filename))
+      return await readdir(this.imagesDir())
     } catch (error) {
-      const maybeError = error as NodeJS.ErrnoException
-      if (maybeError.code !== 'ENOENT') {
-        throw error
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return []
+      }
+      throw error
+    }
+  }
+
+  /** `foo-1724900000000.webp` -> `{ stem: 'foo', ts: 1724900000000 }`, or null when it isn't a note image. */
+  private parseImageName(entry: string): { stem: string; ts: number } | null {
+    const dot = entry.lastIndexOf('.')
+    if (dot <= 0 || !SUPPORTED_IMAGE_EXTENSIONS.has(entry.slice(dot + 1).toLowerCase())) {
+      return null
+    }
+    const stemMatch = IMAGE_STEM_PATTERN.exec(entry.slice(0, dot))
+    return stemMatch ? { stem: stemMatch[1], ts: Number(stemMatch[2]) } : null
+  }
+
+  /** Single scan of `images/` into `imagesByStem`, keeping the newest timestamp per stem. */
+  private async scanImages(): Promise<void> {
+    this.imagesByStem.clear()
+
+    const newestByStem = new Map<string, number>()
+    for (const entry of await this.listImageDir()) {
+      const parsed = this.parseImageName(entry)
+      if (!parsed) {
+        continue
+      }
+      const newest = newestByStem.get(parsed.stem)
+      if (newest === undefined || parsed.ts > newest) {
+        newestByStem.set(parsed.stem, parsed.ts)
+        this.imagesByStem.set(parsed.stem, entry)
       }
     }
+  }
+
+  /** Deletes every `images/<stem>-<digits><ext>` file (current image plus any stale leftovers). */
+  private async deleteImageFiles(stem: string): Promise<void> {
+    await Promise.all(
+      (await this.listImageDir())
+        .filter((entry) => this.parseImageName(entry)?.stem === stem)
+        .map(async (entry) => {
+          try {
+            await unlink(this.imageFilePath(entry))
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+              throw error
+            }
+          }
+        })
+    )
   }
 
   private async persistSettings(): Promise<void> {

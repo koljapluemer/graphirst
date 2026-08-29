@@ -20,6 +20,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent
 } from 'react'
+import type { ImageState } from './DraftNoteCard'
 import FloatingEdge from './FloatingEdge'
 import NoteNode, { type NoteFlowNode } from './NoteNode'
 import PaneSearchMenu from './PaneSearchMenu'
@@ -137,21 +138,21 @@ interface ViewCallbacks {
   onSaveEdit: (
     filename: string,
     body: string,
-    image: string | null,
-    aliases: string[]
+    image: ImageState,
+    previousImage: string | null,
+    aliases: string[],
+    extraContent: string
   ) => Promise<void>
-  onUpdateAliases: (
+  onUpdateNoteMeta: (
     filename: string,
-    body: string,
-    image: string | null,
-    aliases: string[]
+    patch: { body: string; aliases: string[]; extraContent: string }
   ) => Promise<void>
   onSaveDraft: (
     draft: DraftInteraction,
     body: string,
     label: string,
     reverse: boolean,
-    image: string | null
+    image: ImageState
   ) => Promise<void>
   onCancelInteraction: () => void
   onConfirmConnection: (connecting: ConnectingInteraction, label: string) => Promise<void>
@@ -202,8 +203,15 @@ function buildView(
           kind: 'edit',
           initialBody: item.note.body,
           initialImage: item.note.image,
-          onSave: (body: string, image: string | null) =>
-            callbacks.onSaveEdit(item.note.filename, body, image, item.note.aliases),
+          onSave: (body: string, image: ImageState) =>
+            callbacks.onSaveEdit(
+              item.note.filename,
+              body,
+              image,
+              item.note.image,
+              item.note.aliases,
+              item.note.extraContent
+            ),
           onCancel: callbacks.onCancelInteraction
         }
       }
@@ -218,7 +226,18 @@ function buildView(
         isAnchor: item.note.filename === anchorFilename,
         onDelete: callbacks.onDeleteNote,
         onEdit: callbacks.onStartEdit,
-        onUpdateAliases: callbacks.onUpdateAliases,
+        onUpdateAliases: (filename: string, aliases: string[]) =>
+          callbacks.onUpdateNoteMeta(filename, {
+            body: item.note.body,
+            aliases,
+            extraContent: item.note.extraContent
+          }),
+        onUpdateExtra: (filename: string, extraContent: string) =>
+          callbacks.onUpdateNoteMeta(filename, {
+            body: item.note.body,
+            aliases: item.note.aliases,
+            extraContent
+          }),
         onPin: callbacks.onPinNote,
         onUnpin: callbacks.onUnpinNote,
         onChangeDepth: callbacks.onChangeDepth,
@@ -522,15 +541,20 @@ function FlowScene({
       body: string,
       label: string,
       reverse: boolean,
-      image: string | null
+      image: ImageState
     ): Promise<void> => {
       const response = await window.api.notes.createNote({
         relatedFilename: draft.sourceFilename ?? undefined,
         label,
         reverse,
-        body,
-        image: image ?? undefined
+        body
       })
+
+      // A brand-new note has no on-disk stem until it exists, so its image is a
+      // second write - mirrors how `../note` adds an image right after `addNote`.
+      if (image?.status === 'new') {
+        await window.api.notes.attachImage({ filename: response.filename, dataUrl: image.dataUrl })
+      }
 
       // The new note becomes its own BFS root, so its relation to the source renders
       // correctly even if the source itself is several hops from every other pin.
@@ -563,26 +587,35 @@ function FlowScene({
     async (
       filename: string,
       body: string,
-      image: string | null,
-      aliases: string[]
+      image: ImageState,
+      previousImage: string | null,
+      aliases: string[],
+      extraContent: string
     ): Promise<void> => {
-      await window.api.notes.updateNote({ filename, body, image, aliases })
+      await window.api.notes.updateNote({ filename, body, aliases, extraContent })
+
+      // Image is stored out-of-band (a loose `images/` file, no JSON key), so it
+      // reconciles separately from the note body.
+      if (image?.status === 'new') {
+        await window.api.notes.attachImage({ filename, dataUrl: image.dataUrl })
+      } else if (image === null && previousImage !== null) {
+        await window.api.notes.clearImage({ filename })
+      }
+
       markInteraction(filename)
       setInteraction(IDLE_INTERACTION)
     },
     [markInteraction]
   )
 
-  // Aliases don't affect body/image, so unlike handleSaveEdit this never touches
-  // layout - no markInteraction/anchor promotion needed.
-  const handleUpdateAliases = useCallback(
+  // Alias/extra-content edits don't change body or image, so unlike handleSaveEdit
+  // this never touches layout - no markInteraction/anchor promotion needed.
+  const handleUpdateNoteMeta = useCallback(
     async (
       filename: string,
-      body: string,
-      image: string | null,
-      aliases: string[]
+      patch: { body: string; aliases: string[]; extraContent: string }
     ): Promise<void> => {
-      await window.api.notes.updateNote({ filename, body, image, aliases })
+      await window.api.notes.updateNote({ filename, ...patch })
     },
     []
   )
@@ -661,7 +694,7 @@ function FlowScene({
         onDeleteNote: handleDeleteNote,
         onStartEdit: handleStartEdit,
         onSaveEdit: handleSaveEdit,
-        onUpdateAliases: handleUpdateAliases,
+        onUpdateNoteMeta: handleUpdateNoteMeta,
         onSaveDraft: handleSaveDraft,
         onCancelInteraction: handleCancelInteraction,
         onConfirmConnection: handleConfirmConnection,
@@ -680,7 +713,7 @@ function FlowScene({
       handleDeleteNote,
       handleStartEdit,
       handleSaveEdit,
-      handleUpdateAliases,
+      handleUpdateNoteMeta,
       handleSaveDraft,
       handleCancelInteraction,
       handleConfirmConnection,

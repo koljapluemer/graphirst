@@ -4,8 +4,13 @@ export interface RawNoteFile {
   body?: string
   rels?: NoteRelationTuple[]
   aliases?: string[]
-  /** Filename of an attached image inside the graph folder's media/ subdirectory. */
-  image?: string
+  /**
+   * Long-form content for this note. Shared verbatim with the sibling `../note`
+   * app, which owns this key. An attached image is NOT referenced here - it is a
+   * loose file in the graph folder's `images/` subdirectory, matched to this note
+   * by filename stem (see NoteStore.imagesByStem).
+   */
+  extra?: string
   /** Freeform comments/to-dos attached to this note, rendered on the node itself. */
   notes?: string[]
 }
@@ -23,7 +28,9 @@ export interface IndexedNote {
   aliases: string[]
   rels: NoteLink[]
   degree: number
+  /** Filename (inside the graph folder's `images/` subdirectory) of the image matched to this note by stem, or null. */
   image: string | null
+  extraContent: string
   notes: string[]
 }
 
@@ -37,6 +44,7 @@ export interface GraphNodePayload {
   body: string
   image: string | null
   aliases: string[]
+  extraContent: string
   /** Hops from the nearest pin that discovered this node. Informational only. */
   depth: number
   degree: number
@@ -136,8 +144,6 @@ export interface CreateNoteRequest {
   /** When false (default): relatedFilename -> newNote. When true: newNote -> relatedFilename. */
   reverse?: boolean
   body: string
-  /** Filename of an image already written via saveImage(), or omit for none. */
-  image?: string
 }
 
 export interface CreateNoteResponse {
@@ -153,19 +159,26 @@ export interface DeleteNoteRequest {
 export interface UpdateNoteRequest {
   filename: string
   body: string
-  /** Full desired image state - null means "no image", always sent (unlike a PATCH-style partial). */
-  image: string | null
   /** Full desired alias list, always sent (unlike a PATCH-style partial). */
   aliases: string[]
+  /** Full desired extra content - empty string removes the `extra` key. Always sent (unlike a PATCH-style partial). */
+  extraContent: string
 }
 
-export interface SaveImageRequest {
+export interface AttachImageRequest {
+  /** The note the image is being attached to (its .json filename). */
+  filename: string
   /** A data: URL, e.g. "data:image/webp;base64,...". */
   dataUrl: string
 }
 
-export interface SaveImageResponse {
-  /** Filename the image was written under inside the graph folder's media/ subdirectory. */
+export interface AttachImageResponse {
+  /** Filename the image was written under inside the graph folder's images/ subdirectory. */
+  image: string
+}
+
+export interface ClearImageRequest {
+  /** The note whose attached image should be removed (its .json filename). */
   filename: string
 }
 
@@ -235,7 +248,8 @@ export interface NotesApi {
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
   deleteNote: (request: DeleteNoteRequest) => Promise<void>
   updateNote: (request: UpdateNoteRequest) => Promise<void>
-  saveImage: (request: SaveImageRequest) => Promise<SaveImageResponse>
+  attachImage: (request: AttachImageRequest) => Promise<AttachImageResponse>
+  clearImage: (request: ClearImageRequest) => Promise<void>
   connectNotes: (request: ConnectNotesRequest) => Promise<ConnectNotesResponse>
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>

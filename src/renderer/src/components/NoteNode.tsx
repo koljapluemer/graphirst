@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
-import DraftNoteCard from './DraftNoteCard'
+import DraftNoteCard, { type ImageState } from './DraftNoteCard'
 import NoteCard from './NoteCard'
 import type { GraphNodePayload } from '../../../shared/notes'
 
@@ -13,12 +13,8 @@ export type NoteNodeData =
       isAnchor: boolean
       onDelete: (filename: string) => Promise<void>
       onEdit: (filename: string) => void
-      onUpdateAliases: (
-        filename: string,
-        body: string,
-        image: string | null,
-        aliases: string[]
-      ) => Promise<void>
+      onUpdateAliases: (filename: string, aliases: string[]) => Promise<void>
+      onUpdateExtra: (filename: string, extraContent: string) => Promise<void>
       onPin: (filename: string) => void
       onUnpin: (filename: string) => void
       onChangeDepth: (filename: string, nextDepth: number) => void
@@ -28,14 +24,14 @@ export type NoteNodeData =
       kind: 'draft'
       /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
       showRelation: boolean
-      onSave: (body: string, label: string, reverse: boolean, image: string | null) => Promise<void>
+      onSave: (body: string, label: string, reverse: boolean, image: ImageState) => Promise<void>
       onCancel: () => void
     }
   | {
       kind: 'edit'
       initialBody: string
       initialImage: string | null
-      onSave: (body: string, image: string | null) => Promise<void>
+      onSave: (body: string, image: ImageState) => Promise<void>
       onCancel: () => void
     }
 
@@ -95,6 +91,7 @@ export default function NoteNode({ data, selected }: NodeProps<NoteFlowNode>): R
           onDelete={data.onDelete}
           onEdit={data.onEdit}
           onUpdateAliases={data.onUpdateAliases}
+          onUpdateExtra={data.onUpdateExtra}
           onPin={data.onPin}
           onUnpin={data.onUnpin}
           onChangeDepth={data.onChangeDepth}

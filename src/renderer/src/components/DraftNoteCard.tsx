@@ -8,6 +8,15 @@ import {
 } from 'react'
 import { compressImage } from '../lib/compress-image'
 
+/**
+ * One attached image, one per note. `existing` carries the filename already on
+ * disk (unchanged); `new` carries freshly pasted, compressed bytes not yet
+ * written; `null` means "no image" (a removal, in edit mode). Persisting it is
+ * the save handler's job - this card only tracks the intent.
+ */
+export type ImageState =
+  { status: 'existing'; filename: string } | { status: 'new'; dataUrl: string } | null
+
 export interface DraftNoteCardProps {
   /** 'edit' reuses this same card to edit an existing note's body in place, in lieu of a separate dialog. */
   mode?: 'create' | 'edit'
@@ -17,13 +26,9 @@ export interface DraftNoteCardProps {
   initialImage?: string | null
   /** Whether to show the relation-label/reverse fields - false for a freestanding note with no related note. */
   showRelation: boolean
-  onSave: (body: string, label: string, reverse: boolean, image: string | null) => Promise<void>
+  onSave: (body: string, label: string, reverse: boolean, image: ImageState) => Promise<void>
   onCancel: () => void
 }
-
-/** One attached image, one per note (see tckt/issues/allow-attaching-images.md). */
-type ImageState =
-  { status: 'existing'; filename: string } | { status: 'new'; dataUrl: string } | null
 
 export default function DraftNoteCard({
   mode = 'create',
@@ -87,14 +92,7 @@ export default function DraftNoteCard({
     setError(null)
 
     try {
-      const imageFilename =
-        image?.status === 'existing'
-          ? image.filename
-          : image?.status === 'new'
-            ? (await window.api.notes.saveImage({ dataUrl: image.dataUrl })).filename
-            : null
-
-      await onSave(body, label, reverse, imageFilename)
+      await onSave(body, label, reverse, image)
     } catch (saveError) {
       setError((saveError as Error).message)
       setSaving(false)

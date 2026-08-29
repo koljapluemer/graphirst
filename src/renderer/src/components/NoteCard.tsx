@@ -1,8 +1,9 @@
-import { ExternalLink, Pencil, Tags, Trash2, X } from 'lucide-react'
+import { ExternalLink, FileText, Pencil, Tags, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import AliasEditorModal from './AliasEditorModal'
+import ExtraContentModal from './ExtraContentModal'
 import PinControl from './PinControl'
 import type { GraphNodePayload } from '../../../shared/notes'
 
@@ -14,6 +15,7 @@ export default function NoteCard({
   onDelete,
   onEdit,
   onUpdateAliases,
+  onUpdateExtra,
   onPin,
   onUnpin,
   onChangeDepth,
@@ -26,12 +28,8 @@ export default function NoteCard({
   selected: boolean
   onDelete: (filename: string) => Promise<void>
   onEdit: (filename: string) => void
-  onUpdateAliases: (
-    filename: string,
-    body: string,
-    image: string | null,
-    aliases: string[]
-  ) => Promise<void>
+  onUpdateAliases: (filename: string, aliases: string[]) => Promise<void>
+  onUpdateExtra: (filename: string, extraContent: string) => Promise<void>
   onPin: (filename: string) => void
   onUnpin: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
@@ -40,6 +38,8 @@ export default function NoteCard({
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [aliasModalOpen, setAliasModalOpen] = useState(false)
+  const [extraModalOpen, setExtraModalOpen] = useState(false)
+  const hasExtra = note.extraContent.trim().length > 0
 
   const handleDelete = async (): Promise<void> => {
     setDeleting(true)
@@ -92,6 +92,17 @@ export default function NoteCard({
             title="Edit aliases"
           >
             <Tags className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className={`btn btn-ghost btn-xs rounded-full ${hasExtra ? 'text-primary' : ''}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              setExtraModalOpen(true)
+            }}
+            title={hasExtra ? 'Edit extra content' : 'Add extra content'}
+          >
+            <FileText className="size-3.5" />
           </button>
           <button
             type="button"
@@ -166,8 +177,16 @@ export default function NoteCard({
       {aliasModalOpen ? (
         <AliasEditorModal
           aliases={note.aliases}
-          onSave={(aliases) => onUpdateAliases(note.filename, note.body, note.image, aliases)}
+          onSave={(aliases) => onUpdateAliases(note.filename, aliases)}
           onClose={() => setAliasModalOpen(false)}
+        />
+      ) : null}
+
+      {extraModalOpen ? (
+        <ExtraContentModal
+          value={note.extraContent}
+          onSave={(extraContent) => onUpdateExtra(note.filename, extraContent)}
+          onClose={() => setExtraModalOpen(false)}
         />
       ) : null}
     </article>

@@ -5,6 +5,8 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { NOTES_CHANGED_EVENT, NOTES_INDEX_PROGRESS_EVENT, NoteStore } from './note-store'
 import type {
+  AttachImageRequest,
+  ClearImageRequest,
   ConnectNotesRequest,
   CreateNoteRequest,
   DeleteNoteEntryRequest,
@@ -14,7 +16,6 @@ import type {
   PinSpec,
   RandomOrphanRequest,
   RandomWithNotesRequest,
-  SaveImageRequest,
   SearchMode,
   UpdateNoteRequest,
   UpdateRelationRequest
@@ -26,7 +27,8 @@ const MEDIA_MIME_TYPES: Record<string, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
-  gif: 'image/gif'
+  gif: 'image/gif',
+  bmp: 'image/bmp'
 }
 
 // Must run before app 'ready' - registers the scheme itself as privileged
@@ -99,7 +101,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // Serves note-attached images straight out of <graphPath>/media - reads the graph
+  // Serves note-attached images straight out of <graphPath>/images - reads the graph
   // path fresh on every request (rather than capturing it once) since it can change
   // at runtime via pickDirectory/setGraphPath.
   protocol.handle(MEDIA_PROTOCOL, async (request) => {
@@ -112,7 +114,7 @@ app.whenReady().then(() => {
     }
 
     try {
-      const data = await readFile(join(noteStore.getCurrentPath(), 'media', filename))
+      const data = await readFile(join(noteStore.getCurrentPath(), 'images', filename))
       return new Response(data, { headers: { 'content-type': mimeType } })
     } catch {
       return new Response(null, { status: 404 })
@@ -152,8 +154,12 @@ app.whenReady().then(() => {
     return noteStore.updateNote(request)
   })
 
-  ipcMain.handle('notes:save-image', async (_event, request: SaveImageRequest) => {
-    return noteStore.saveImage(request)
+  ipcMain.handle('notes:attach-image', async (_event, request: AttachImageRequest) => {
+    return noteStore.attachImage(request)
+  })
+
+  ipcMain.handle('notes:clear-image', async (_event, request: ClearImageRequest) => {
+    return noteStore.clearImage(request)
   })
 
   ipcMain.handle('notes:connect', async (_event, request: ConnectNotesRequest) => {

@@ -216,16 +216,6 @@ export interface RandomOrphanResponse {
   filename: string | null
 }
 
-export interface RandomWithNotesRequest {
-  /** Filenames to exclude from the pick, i.e. notes already open on the graph. */
-  exclude: string[]
-}
-
-export interface RandomWithNotesResponse {
-  /** Null when no note carrying a `notes` entry is available to pick. */
-  filename: string | null
-}
-
 export interface DeleteNoteEntryRequest {
   filename: string
   /** Index into that note's `notes` array of the entry to remove. */
@@ -254,7 +244,6 @@ export interface NotesApi {
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>
   randomOrphan: (request: RandomOrphanRequest) => Promise<RandomOrphanResponse>
-  randomWithNotes: (request: RandomWithNotesRequest) => Promise<RandomWithNotesResponse>
   deleteNoteEntry: (request: DeleteNoteEntryRequest) => Promise<void>
   /** Restores whatever `deleteNote`/`deleteRelation` most recently removed. */
   undoDelete: () => Promise<UndoDeleteResponse>

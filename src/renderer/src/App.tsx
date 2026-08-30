@@ -8,8 +8,7 @@ import {
   PinOff,
   RefreshCw,
   Search,
-  Settings2,
-  StickyNote
+  Settings2
 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import SearchModeToggle from './components/SearchModeToggle'
@@ -40,7 +39,6 @@ function App(): React.JSX.Element {
   const [statsOpen, setStatsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [orphanBusy, setOrphanBusy] = useState(false)
-  const [notedBusy, setNotedBusy] = useState(false)
   const { results, loading: searchLoading } = useNoteSearch(query, {
     enabled: bootstrap?.status === 'ready',
     onError: (error) => setErrorMessage(error.message),
@@ -153,23 +151,6 @@ function App(): React.JSX.Element {
       setErrorMessage((error as Error).message)
     } finally {
       setOrphanBusy(false)
-    }
-  }
-
-  const handleOpenRandomWithNote = async (): Promise<void> => {
-    setNotedBusy(true)
-    try {
-      const response = await window.api.notes.randomWithNotes({ exclude: Array.from(pins.keys()) })
-      if (response.filename) {
-        pinNote(response.filename, MANUAL_PIN_DEPTH)
-        setErrorMessage(null)
-      } else {
-        setErrorMessage('No unopened notes with a note left to open.')
-      }
-    } catch (error) {
-      setErrorMessage((error as Error).message)
-    } finally {
-      setNotedBusy(false)
     }
   }
 
@@ -315,15 +296,6 @@ function App(): React.JSX.Element {
             >
               <Dices className={['size-2', orphanBusy ? 'animate-spin' : ''].join(' ')} />
               Pin Orphan
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void handleOpenRandomWithNote()}
-              disabled={notedBusy}
-            >
-              <StickyNote className={['size-2', notedBusy ? 'animate-spin' : ''].join(' ')} />
-              Pin Random w/ Note
             </button>
             <button
               type="button"

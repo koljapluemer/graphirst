@@ -15,7 +15,6 @@ import type {
   IndexProgress,
   PinSpec,
   RandomOrphanRequest,
-  RandomWithNotesRequest,
   SearchMode,
   UpdateNoteRequest,
   UpdateRelationRequest
@@ -179,10 +178,6 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:random-orphan', async (_event, request: RandomOrphanRequest) => {
     return noteStore.randomOrphan(request)
-  })
-
-  ipcMain.handle('notes:random-with-notes', async (_event, request: RandomWithNotesRequest) => {
-    return noteStore.randomWithNotes(request)
   })
 
   ipcMain.handle('notes:delete-note-entry', async (_event, request: DeleteNoteEntryRequest) => {

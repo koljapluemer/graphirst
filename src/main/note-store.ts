@@ -29,8 +29,6 @@ import type {
   PinSpec,
   RandomOrphanRequest,
   RandomOrphanResponse,
-  RandomWithNotesRequest,
-  RandomWithNotesResponse,
   RawNoteFile,
   SearchMode,
   SearchResult,
@@ -600,28 +598,6 @@ export class NoteStore extends EventEmitter {
     const candidates: string[] = []
     for (const note of this.notes.values()) {
       if (note.degree === 0 && !excluded.has(note.filename)) {
-        candidates.push(note.filename)
-      }
-    }
-
-    if (candidates.length === 0) {
-      return { filename: null }
-    }
-
-    return { filename: candidates[Math.floor(Math.random() * candidates.length)] }
-  }
-
-  async randomWithNotes(request: RandomWithNotesRequest): Promise<RandomWithNotesResponse> {
-    await this.ensureIndexed()
-
-    if (!this.stats) {
-      throw new Error(this.message ?? 'The note index is not ready yet.')
-    }
-
-    const excluded = new Set(request.exclude)
-    const candidates: string[] = []
-    for (const note of this.notes.values()) {
-      if (note.notes.length > 0 && !excluded.has(note.filename)) {
         candidates.push(note.filename)
       }
     }

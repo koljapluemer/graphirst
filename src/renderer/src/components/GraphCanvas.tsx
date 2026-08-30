@@ -8,9 +8,11 @@ import {
   ReactFlowProvider,
   useNodesInitialized,
   useReactFlow,
+  useStore,
   type Edge,
   type OnConnectEnd,
-  type OnConnectStart
+  type OnConnectStart,
+  type ReactFlowState
 } from '@xyflow/react'
 import {
   useCallback,
@@ -90,6 +92,64 @@ interface LayoutedNode {
 interface LayoutedGraph {
   nodes: LayoutedNode[]
 }
+
+/**
+ * Where the current `layouted` sits in the two-pass layout sequence:
+ * - `estimated`: laid out from estimateNodeHeight() guesses, waiting for React
+ *   Flow to measure the rendered cards.
+ * - `measured`: laid out from real measured heights. `fromHeights` is the
+ *   signature of the heights that pass consumed, so a re-measure only triggers
+ *   another layout when a card's height has actually changed.
+ */
+type LayoutState = { phase: 'estimated' } | { phase: 'measured'; fromHeights: string }
+
+const ESTIMATED_LAYOUT: LayoutState = { phase: 'estimated' }
+
+// Height delta (px) below which a measured card isn't worth re-laying-out for -
+// pairs with the integer rounding in collectMeasuredHeights.
+const LAYOUT_HEIGHT_TOLERANCE = 8
+
+/** Minimal shape shared by React Flow's public `Node` and its `InternalNode`. */
+type MeasuredNode = { id: string; type?: string; measured?: { height?: number } }
+
+/**
+ * Per-`note`-node measured heights, keyed by filename (which is the node id).
+ * Draft/edit cards are excluded - they are placed by hand, not by ELK.
+ */
+function collectMeasuredHeights(nodes: Iterable<MeasuredNode>): Map<string, number> {
+  const heights = new Map<string, number>()
+  for (const node of nodes) {
+    if (node.type === 'note' && node.measured?.height) {
+      heights.set(node.id, Math.round(node.measured.height))
+    }
+  }
+  return heights
+}
+
+/** Order-independent string identity for a set of measured heights. */
+function measuredHeightSignature(heights: ReadonlyMap<string, number>): string {
+  return [...heights]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([id, height]) => `${id}:${height}`)
+    .join('|')
+}
+
+/**
+ * Whether any card's measured height is far enough from the height ELK reserved
+ * for its slot to be worth re-running the layout.
+ */
+function layoutHeightsDrifted(
+  layouted: LayoutedGraph,
+  measuredHeights: ReadonlyMap<string, number>
+): boolean {
+  return layouted.nodes.some((item) => {
+    const measured = measuredHeights.get(item.note.filename)
+    return measured !== undefined && Math.abs(measured - item.height) > LAYOUT_HEIGHT_TOLERANCE
+  })
+}
+
+const selectMeasuredHeightSignature = (state: ReactFlowState): string =>
+  measuredHeightSignature(collectMeasuredHeights(state.nodeLookup.values()))
 
 /**
  * What the user is currently doing on the canvas, beyond just looking at it.
@@ -183,9 +243,10 @@ function buildView(
   const nodes: NoteFlowNode[] = layouted.nodes.map((item) => {
     // No `height` here - the card sizes to its own content (see .note-card in
     // main.css) and React Flow measures the real rendered height via its
-    // internal ResizeObserver instead of us forcing a layout-time estimate onto
-    // the DOM. `item.height` remains the estimate ELK used to space this node's
-    // layout slot; it's unrelated to what the node actually renders at now.
+    // internal ResizeObserver instead of us forcing one onto the DOM.
+    // `item.height` is the height ELK spaced this node's slot with - an estimate
+    // on the first layout pass, the measured height on the second (see the
+    // layout effects in FlowScene).
     const shared = {
       id: item.note.filename,
       type: 'note' as const,
@@ -367,9 +428,14 @@ function FlowScene({
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
 }): React.JSX.Element {
-  const { fitView, screenToFlowPosition } = useReactFlow()
+  const { fitView, screenToFlowPosition, getNodes } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
+  // Reactive signal: changes whenever any card's measured height changes, so the
+  // measured-height layout pass below re-runs when a card grows (body edit, an
+  // image finishing load) and not on unrelated store updates like viewport pans.
+  const measuredSignature = useStore(selectMeasuredHeightSignature)
   const [layouted, setLayouted] = useState<LayoutedGraph>({ nodes: [] })
+  const [layoutState, setLayoutState] = useState<LayoutState>(ESTIMATED_LAYOUT)
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
   const connectingFromRef = useRef<string | null>(null)
   // Mirrors `layouted` outside of state so runLayout can read the latest positions
@@ -411,6 +477,9 @@ function FlowScene({
     previousPinsRef.current = pins
   }, [pins, markInteraction])
 
+  // First layout pass: whenever the graph changes, lay it out from height
+  // estimates and drop back to `estimated` so the measured pass below re-runs
+  // for the new node set.
   useEffect(() => {
     let cancelled = false
 
@@ -430,6 +499,7 @@ function FlowScene({
           }
 
           setLayouted(nextLayout)
+          setLayoutState(ESTIMATED_LAYOUT)
         }
       } catch (error) {
         // Never let this fail silently: an uncaught rejection here used to leave
@@ -445,8 +515,75 @@ function FlowScene({
     }
   }, [graph])
 
+  // Second layout pass. The first pass spaced nodes with estimateNodeHeight()
+  // guesses; once React Flow has measured every card, re-run the layout with
+  // those exact heights so the vertical gap between stacked nodes matches the
+  // DOM instead of drifting by the estimate's error.
+  //
+  // `layoutState` keeps this from looping: a pass records the height signature
+  // it consumed and this only fires again when that signature actually moves.
+  // Suppressed mid-interaction - an editing card grows as it is typed into and
+  // is floated above its neighbours (EDITING_NODE_Z_INDEX) rather than reflowed.
   useEffect(() => {
-    if (!nodesInitialized || layouted.nodes.length === 0) {
+    if (interaction.type !== 'idle' || !nodesInitialized || layouted.nodes.length === 0) {
+      return
+    }
+
+    const measuredHeights = collectMeasuredHeights(getNodes())
+    const everyNodeMeasured = layouted.nodes.every((item) =>
+      measuredHeights.has(item.note.filename)
+    )
+    if (!everyNodeMeasured) {
+      return
+    }
+
+    const signature = measuredHeightSignature(measuredHeights)
+    if (layoutState.phase === 'measured' && layoutState.fromHeights === signature) {
+      return
+    }
+
+    let cancelled = false
+
+    // Relayout only when a card's measured height has drifted far enough from
+    // the height ELK reserved for it to move a neighbour; otherwise just record
+    // that this height signature is accounted for.
+    const settle = async (): Promise<void> => {
+      try {
+        const nextLayout = layoutHeightsDrifted(layouted, measuredHeights)
+          ? await getLayoutedGraph(graph, layoutedRef.current, anchorRef.current, measuredHeights)
+          : null
+        if (cancelled) {
+          return
+        }
+        if (nextLayout) {
+          layoutedRef.current = nextLayout
+          setLayouted(nextLayout)
+        }
+        setLayoutState({ phase: 'measured', fromHeights: signature })
+      } catch (error) {
+        console.error('Failed to re-lay out graph from measured heights:', error)
+      }
+    }
+
+    void settle()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    graph,
+    layouted,
+    layoutState,
+    interaction.type,
+    nodesInitialized,
+    measuredSignature,
+    getNodes
+  ])
+
+  // Reframe once the layout is final (measured pass done), so fitView never
+  // frames the estimated layout and then jumps when the measured pass shifts it.
+  useEffect(() => {
+    if (layoutState.phase !== 'measured' || layouted.nodes.length === 0) {
       return
     }
 
@@ -465,7 +602,7 @@ function FlowScene({
       cancelAnimationFrame(firstFrame)
       cancelAnimationFrame(secondFrame)
     }
-  }, [fitView, layouted.nodes.length, graph.edges.length, nodesInitialized])
+  }, [fitView, layoutState, layouted.nodes.length])
 
   const onConnectStart: OnConnectStart = useCallback((_event, { nodeId }) => {
     connectingFromRef.current = nodeId
@@ -830,14 +967,17 @@ export default function GraphCanvas({
 async function getLayoutedGraph(
   graph: NoteGraph,
   previousLayout: LayoutedGraph,
-  anchorFilename: string | null
+  anchorFilename: string | null,
+  // Supplied on the second layout pass: React Flow's real measured card heights,
+  // keyed by filename. The first pass omits it and falls back to an estimate.
+  measuredHeights?: ReadonlyMap<string, number>
 ): Promise<LayoutedGraph> {
   const nodeSizes = new Map(
     graph.nodes.map((note) => [
       note.filename,
       {
         width: NODE_WIDTH,
-        height: estimateNodeHeight(note)
+        height: measuredHeights?.get(note.filename) ?? estimateNodeHeight(note)
       }
     ])
   )
@@ -1025,9 +1165,17 @@ function buildReciprocalEdge(
   }
 }
 
-// Matches the max-h-44 (176px) cap the attached-image preview renders at in NoteCard.
+// First-paint height allowance for a card with an attached image. NoteCard
+// renders the image unconstrained (h-auto w-full), so this is a rough guess for
+// the initial estimate only - the measured-height layout pass in FlowScene
+// corrects the spacing once the real card exists.
 const IMAGE_HEIGHT_ESTIMATE = 176
 
+/**
+ * Cheap per-note height guess for the *first* layout pass, before React Flow has
+ * measured the real cards. Deliberately approximate - the measured-height pass
+ * in FlowScene corrects ELK's spacing once the DOM exists.
+ */
 function estimateNodeHeight(note: GraphNodePayload): number {
   const lineCount = note.body.split('\n').length
   const textWeight = Math.ceil(note.body.length / 110)

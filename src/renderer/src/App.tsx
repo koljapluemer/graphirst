@@ -216,7 +216,7 @@ function App(): React.JSX.Element {
                     pinNote(results[0].filename, SEARCH_RESULT_PIN_DEPTH)
                   }
                 }}
-                placeholder="Search body or aliases…"
+                placeholder="Search notes…"
               />
               {searchLoading ? (
                 <LoaderCircle className="size-4 animate-spin text-base-content/60" />
@@ -265,18 +265,6 @@ function App(): React.JSX.Element {
                     onClick={() => pinNote(result.filename, SEARCH_RESULT_PIN_DEPTH)}
                   >
                     <p className="line-clamp-4 text-xs leading-5">{result.preview}</p>
-                    {result.aliases.length ? (
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {result.aliases.slice(0, 5).map((alias) => (
-                          <span
-                            key={alias}
-                            className="rounded-full border border-base-300 px-2 py-0.5 text-xs text-base-content/60"
-                          >
-                            {alias}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
                   </button>
                 )
               })}

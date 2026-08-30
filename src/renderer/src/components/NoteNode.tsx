@@ -13,7 +13,6 @@ export type NoteNodeData =
       isAnchor: boolean
       onDelete: (filename: string) => Promise<void>
       onEdit: (filename: string) => void
-      onUpdateAliases: (filename: string, aliases: string[]) => Promise<void>
       onUpdateExtra: (filename: string, extraContent: string) => Promise<void>
       onPin: (filename: string) => void
       onUnpin: (filename: string) => void
@@ -90,7 +89,6 @@ export default function NoteNode({ data, selected }: NodeProps<NoteFlowNode>): R
           selected={selected}
           onDelete={data.onDelete}
           onEdit={data.onEdit}
-          onUpdateAliases={data.onUpdateAliases}
           onUpdateExtra={data.onUpdateExtra}
           onPin={data.onPin}
           onUnpin={data.onUnpin}

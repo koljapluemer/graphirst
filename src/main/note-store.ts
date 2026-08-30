@@ -59,6 +59,13 @@ const SUPPORTED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp',
 /** basename-without-extension of an image file: `<stem>-<digits>`. */
 const IMAGE_STEM_PATTERN = /^(.+)-(\d+)$/
 const MAX_SEARCH_RESULTS = 40
+/**
+ * Subtracted from the score of a result that matched only in a note's extra
+ * content (nothing in the body). Large enough to sink every such result below
+ * every body match, so they land at the tail of the same list without being
+ * split out or labelled.
+ */
+const EXTRA_ONLY_RANK_PENALTY = 100_000
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
 const MAX_GRAPH_NODES = 140
@@ -75,8 +82,8 @@ interface StoredSettings {
 
 interface SearchDocument extends Record<string, string> {
   id: string
-  aliases: string
   body: string
+  extra: string
 }
 
 interface IncomingRelation {
@@ -456,11 +463,6 @@ export class NoteStore extends EventEmitter {
 
     await this.mutateRawNote(request.filename, (parsed) => {
       parsed.body = request.body
-      if (request.aliases.length > 0) {
-        parsed.aliases = request.aliases
-      } else {
-        delete parsed.aliases
-      }
       if (request.extraContent.trim().length > 0) {
         parsed.extra = request.extraContent
       } else {
@@ -747,21 +749,20 @@ export class NoteStore extends EventEmitter {
 
         this.notes.set(note.filename, note)
 
-        const aliases = note.aliases.join(' ')
         const doc: SearchDocument = {
           id: note.filename,
-          aliases,
-          body: note.body
+          body: note.body,
+          extra: note.extraContent
         }
         this.searchIndex.add(doc)
 
-        // note.bodyCompact is already whitespace-compacted the same way buildPreview
-        // expects, so match indices the worker returns line up with the string
-        // rankRawResult/buildPreviewFromIndex actually slices.
+        // note.bodyCompact/extraCompact are already whitespace-compacted the same
+        // way buildPreview expects, so match indices the worker returns line up
+        // with the string rankRawResult/buildPreviewFromIndex actually slices.
         corpusEntries.push({
           filename: note.filename,
-          aliases,
-          body: note.bodyCompact
+          body: note.bodyCompact,
+          extra: note.extraCompact
         })
       }
 
@@ -809,9 +810,6 @@ export class NoteStore extends EventEmitter {
       const raw = await readFile(join(this.graphPath, filename), 'utf8')
       const parsed = JSON.parse(raw) as RawNoteFile
       const body = typeof parsed.body === 'string' ? parsed.body : ''
-      const aliases = Array.isArray(parsed.aliases)
-        ? parsed.aliases.filter((alias): alias is string => typeof alias === 'string')
-        : []
       const rels = Array.isArray(parsed.rels)
         ? parsed.rels.flatMap((rel) => this.normalizeRelation(rel))
         : []
@@ -825,11 +823,11 @@ export class NoteStore extends EventEmitter {
         filename,
         body,
         bodyCompact: body.replace(/\s+/g, ' ').trim(),
-        aliases,
         rels,
         degree: rels.length,
         image,
         extraContent,
+        extraCompact: extraContent.replace(/\s+/g, ' ').trim(),
         notes
       }
     } catch (error) {
@@ -917,8 +915,8 @@ export class NoteStore extends EventEmitter {
       document: {
         id: 'id',
         index: [
-          { field: 'aliases', tokenize: 'forward', resolution: 8 },
-          { field: 'body', tokenize: 'forward', resolution: 6, context: true }
+          { field: 'body', tokenize: 'forward', resolution: 6, context: true },
+          { field: 'extra', tokenize: 'forward', resolution: 6, context: true }
         ]
       }
     })
@@ -976,23 +974,16 @@ export class NoteStore extends EventEmitter {
 
     const normalizedQuery = this.normalize(query)
     const queryTokens = this.tokenize(normalizedQuery)
-    const aliases = this.normalize(note.aliases.join(' '))
     const body = this.normalize(note.body)
+    const extra = this.normalize(note.extraContent)
 
     let score = 1000 - order * 5
-    let match: SearchResult['match'] = 'body'
-
-    if (aliases.includes(normalizedQuery)) {
-      score += 260
-      match = 'alias'
-    }
 
     if (body.includes(normalizedQuery)) {
       score += 140
-      match = match === 'alias' ? 'mixed' : 'body'
     }
 
-    const haystacks = [aliases, body]
+    const haystacks = [body, extra]
     const matchingTokens = queryTokens.filter((token) =>
       haystacks.some((haystack) => haystack.includes(token))
     )
@@ -1000,17 +991,27 @@ export class NoteStore extends EventEmitter {
 
     if (queryTokens.length > 1 && matchingTokens.length === queryTokens.length) {
       score += 120
-      match = aliases.includes(normalizedQuery) && body.includes(normalizedQuery) ? 'mixed' : match
     }
 
     score += Math.min(note.degree, 24)
 
+    // A hit that lives only in the extra content still belongs in the same result
+    // list, just after every body hit - sink it below them, and preview from the
+    // extra text so the match is actually visible.
+    const matchedInBody =
+      body.includes(normalizedQuery) || queryTokens.some((token) => body.includes(token))
+    const matchedInExtra =
+      extra.includes(normalizedQuery) || queryTokens.some((token) => extra.includes(token))
+    const extraOnly = matchedInExtra && !matchedInBody
+
+    if (extraOnly) {
+      score -= EXTRA_ONLY_RANK_PENALTY
+    }
+
     return {
       filename: note.filename,
-      aliases: note.aliases,
-      preview: this.buildPreview(note.bodyCompact, queryTokens),
-      score,
-      match
+      preview: this.buildPreview(extraOnly ? note.extraCompact : note.bodyCompact, queryTokens),
+      score
     }
   }
 
@@ -1021,12 +1022,6 @@ export class NoteStore extends EventEmitter {
     }
 
     let score = 1000 - order * 5
-    let matchKind: SearchResult['match'] = match.bodyIndex !== null ? 'body' : 'alias'
-
-    if (match.aliasHit) {
-      score += 260
-      matchKind = match.bodyIndex !== null ? 'mixed' : 'alias'
-    }
 
     if (match.bodyIndex !== null) {
       score += 140
@@ -1034,12 +1029,19 @@ export class NoteStore extends EventEmitter {
 
     score += Math.min(note.degree, 24)
 
+    // Matched only in the extra content - keep it in the same list but after every
+    // body hit, and preview from the extra text where the match actually is.
+    const extraOnly = match.bodyIndex === null && match.extraIndex !== null
+    if (extraOnly) {
+      score -= EXTRA_ONLY_RANK_PENALTY
+    }
+
     return {
       filename: note.filename,
-      aliases: note.aliases,
-      preview: this.buildPreviewFromIndex(note.bodyCompact, match.bodyIndex),
-      score,
-      match: matchKind
+      preview: extraOnly
+        ? this.buildPreviewFromIndex(note.extraCompact, match.extraIndex)
+        : this.buildPreviewFromIndex(note.bodyCompact, match.bodyIndex),
+      score
     }
   }
 
@@ -1294,7 +1296,6 @@ export class NoteStore extends EventEmitter {
       filename,
       body: note.body,
       image: note.image,
-      aliases: note.aliases,
       extraContent: note.extraContent,
       depth: meta.depth,
       degree: note.degree,

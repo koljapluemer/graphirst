@@ -200,13 +200,9 @@ interface ViewCallbacks {
     body: string,
     image: ImageState,
     previousImage: string | null,
-    aliases: string[],
     extraContent: string
   ) => Promise<void>
-  onUpdateNoteMeta: (
-    filename: string,
-    patch: { body: string; aliases: string[]; extraContent: string }
-  ) => Promise<void>
+  onUpdateExtra: (filename: string, patch: { body: string; extraContent: string }) => Promise<void>
   onSaveDraft: (
     draft: DraftInteraction,
     body: string,
@@ -270,7 +266,6 @@ function buildView(
               body,
               image,
               item.note.image,
-              item.note.aliases,
               item.note.extraContent
             ),
           onCancel: callbacks.onCancelInteraction
@@ -287,16 +282,9 @@ function buildView(
         isAnchor: item.note.filename === anchorFilename,
         onDelete: callbacks.onDeleteNote,
         onEdit: callbacks.onStartEdit,
-        onUpdateAliases: (filename: string, aliases: string[]) =>
-          callbacks.onUpdateNoteMeta(filename, {
-            body: item.note.body,
-            aliases,
-            extraContent: item.note.extraContent
-          }),
         onUpdateExtra: (filename: string, extraContent: string) =>
-          callbacks.onUpdateNoteMeta(filename, {
+          callbacks.onUpdateExtra(filename, {
             body: item.note.body,
-            aliases: item.note.aliases,
             extraContent
           }),
         onPin: callbacks.onPinNote,
@@ -726,10 +714,9 @@ function FlowScene({
       body: string,
       image: ImageState,
       previousImage: string | null,
-      aliases: string[],
       extraContent: string
     ): Promise<void> => {
-      await window.api.notes.updateNote({ filename, body, aliases, extraContent })
+      await window.api.notes.updateNote({ filename, body, extraContent })
 
       // Image is stored out-of-band (a loose `images/` file, no JSON key), so it
       // reconciles separately from the note body.
@@ -745,13 +732,10 @@ function FlowScene({
     [markInteraction]
   )
 
-  // Alias/extra-content edits don't change body or image, so unlike handleSaveEdit
+  // Extra-content edits don't change body or image, so unlike handleSaveEdit
   // this never touches layout - no markInteraction/anchor promotion needed.
-  const handleUpdateNoteMeta = useCallback(
-    async (
-      filename: string,
-      patch: { body: string; aliases: string[]; extraContent: string }
-    ): Promise<void> => {
+  const handleUpdateExtra = useCallback(
+    async (filename: string, patch: { body: string; extraContent: string }): Promise<void> => {
       await window.api.notes.updateNote({ filename, ...patch })
     },
     []
@@ -831,7 +815,7 @@ function FlowScene({
         onDeleteNote: handleDeleteNote,
         onStartEdit: handleStartEdit,
         onSaveEdit: handleSaveEdit,
-        onUpdateNoteMeta: handleUpdateNoteMeta,
+        onUpdateExtra: handleUpdateExtra,
         onSaveDraft: handleSaveDraft,
         onCancelInteraction: handleCancelInteraction,
         onConfirmConnection: handleConfirmConnection,
@@ -850,7 +834,7 @@ function FlowScene({
       handleDeleteNote,
       handleStartEdit,
       handleSaveEdit,
-      handleUpdateNoteMeta,
+      handleUpdateExtra,
       handleSaveDraft,
       handleCancelInteraction,
       handleConfirmConnection,

@@ -60,20 +60,19 @@ function runSearch(
 
   const matches: RawSearchMatch[] = []
   for (const entry of corpus) {
-    const aliasMatch = isRegex
-      ? findRegex(entry.aliases, re!)
-      : findLiteral(entry.aliases, lowerNeedle)
     const bodyMatch = isRegex ? findRegex(entry.body, re!) : findLiteral(entry.body, lowerNeedle)
+    const extraMatch = isRegex ? findRegex(entry.extra, re!) : findLiteral(entry.extra, lowerNeedle)
 
-    if (!aliasMatch && !bodyMatch) {
+    if (!bodyMatch && !extraMatch) {
       continue
     }
 
     matches.push({
       filename: entry.filename,
-      aliasHit: aliasMatch !== null,
       bodyIndex: bodyMatch ? bodyMatch.index : null,
-      bodyLength: bodyMatch ? bodyMatch.length : 0
+      bodyLength: bodyMatch ? bodyMatch.length : 0,
+      extraIndex: extraMatch ? extraMatch.index : null,
+      extraLength: extraMatch ? extraMatch.length : 0
     })
 
     if (matches.length >= limit) {

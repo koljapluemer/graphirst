@@ -3,7 +3,6 @@ export type NoteRelationTuple = [label: string, target: string]
 export interface RawNoteFile {
   body?: string
   rels?: NoteRelationTuple[]
-  aliases?: string[]
   /**
    * Long-form content for this note. Shared verbatim with the sibling `../note`
    * app, which owns this key. An attached image is NOT referenced here - it is a
@@ -25,12 +24,13 @@ export interface IndexedNote {
   body: string
   /** Whitespace-compacted body, computed once at index time and reused by preview building and raw/regex search instead of recompacting per query. */
   bodyCompact: string
-  aliases: string[]
   rels: NoteLink[]
   degree: number
   /** Filename (inside the graph folder's `images/` subdirectory) of the image matched to this note by stem, or null. */
   image: string | null
   extraContent: string
+  /** Whitespace-compacted extra content, the extra-content counterpart to bodyCompact (search now scans this too). */
+  extraCompact: string
   notes: string[]
 }
 
@@ -43,7 +43,6 @@ export interface GraphNodePayload {
   filename: string
   body: string
   image: string | null
-  aliases: string[]
   extraContent: string
   /** Hops from the nearest pin that discovered this node. Informational only. */
   depth: number
@@ -69,10 +68,8 @@ export interface NoteGraph {
 
 export interface SearchResult {
   filename: string
-  aliases: string[]
   preview: string
   score: number
-  match: 'alias' | 'body' | 'mixed'
 }
 
 /**
@@ -159,8 +156,6 @@ export interface DeleteNoteRequest {
 export interface UpdateNoteRequest {
   filename: string
   body: string
-  /** Full desired alias list, always sent (unlike a PATCH-style partial). */
-  aliases: string[]
   /** Full desired extra content - empty string removes the `extra` key. Always sent (unlike a PATCH-style partial). */
   extraContent: string
 }

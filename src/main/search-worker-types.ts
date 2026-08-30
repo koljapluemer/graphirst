@@ -1,8 +1,8 @@
-/** Corpus entry mirrors what raw/regex search scans: joined aliases and a whitespace-compacted body (same compaction buildPreview already applies, so match indices line up with preview slicing). */
+/** Corpus entry mirrors what raw/regex search scans: whitespace-compacted body and extra content (same compaction buildPreview already applies, so match indices line up with preview slicing). */
 export interface RawSearchCorpusEntry {
   filename: string
-  aliases: string
   body: string
+  extra: string
 }
 
 export type RawSearchWorkerRequest =
@@ -18,10 +18,12 @@ export type RawSearchWorkerRequest =
 
 export interface RawSearchMatch {
   filename: string
-  aliasHit: boolean
-  /** Index of the match within the entry's (compacted) body, or null if the pattern only matched an alias. */
+  /** Index of the match within the entry's (compacted) body, or null if the pattern only matched extra content. */
   bodyIndex: number | null
   bodyLength: number
+  /** Index of the match within the entry's (compacted) extra content, or null if the pattern only matched the body. */
+  extraIndex: number | null
+  extraLength: number
 }
 
 export type RawSearchWorkerResponse =

@@ -2,10 +2,8 @@ import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
   ChartNoAxesCombined,
-  Dices,
   FolderOpen,
   LoaderCircle,
-  PinOff,
   RefreshCw,
   Search,
   Settings2
@@ -174,17 +172,28 @@ function App(): React.JSX.Element {
     <main className="h-screen p-4">
       <div className="grid h-[calc(100vh-2rem)] grid-cols-[minmax(0,1fr)_22rem] gap-4">
         <section className="relative min-h-0">
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm absolute right-4 top-4 z-20 rounded-full border border-base-300 bg-base-100/90"
-            onClick={() => setSettingsOpen(true)}
-            title="Configure graph folder"
-          >
-            <Settings2 className="size-4" />
-          </button>
+          <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm btn-square rounded-full border border-base-300 bg-base-100/90"
+              onClick={() => setSettingsOpen(true)}
+              title="Configure graph folder"
+            >
+              <Settings2 className="size-4" />
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm btn-square rounded-full border border-base-300 bg-base-100/90"
+              onClick={() => setStatsOpen(true)}
+              disabled={bootstrap?.status !== 'ready'}
+              title="Graph stats"
+            >
+              <ChartNoAxesCombined className="size-4" />
+            </button>
+          </div>
 
           {displayedError ? (
-            <div className="alert alert-error alert-soft absolute left-4 top-4 z-20 max-w-md items-start shadow-lg">
+            <div className="alert alert-error alert-soft absolute left-1/2 top-4 z-20 max-w-md -translate-x-1/2 items-start shadow-lg">
               <AlertTriangle className="mt-0.5 size-4.5 shrink-0" />
               <p>{displayedError}</p>
             </div>
@@ -198,6 +207,9 @@ function App(): React.JSX.Element {
               onPinNote={pinNote}
               onUnpinNote={unpinNote}
               onSetPinDepth={setPinDepth}
+              onClearPins={clearPins}
+              onPinRandomOrphan={() => void handlePinRandomOrphan()}
+              pinRandomOrphanBusy={orphanBusy}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />
@@ -269,31 +281,6 @@ function App(): React.JSX.Element {
                 )
               })}
             </div>
-          </div>
-
-          <div className="flex items-center gap-1 flex-wrap border-t border-base-300 p-1">
-            <button type="button" className="btn" onClick={clearPins} disabled={pins.size === 0}>
-              <PinOff className="size-2" />
-              Unpin all
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => void handlePinRandomOrphan()}
-              disabled={orphanBusy}
-            >
-              <Dices className={['size-2', orphanBusy ? 'animate-spin' : ''].join(' ')} />
-              Pin Orphan
-            </button>
-            <button
-              type="button"
-              className="btn ml-auto"
-              onClick={() => setStatsOpen(true)}
-              disabled={bootstrap?.status !== 'ready'}
-            >
-              <ChartNoAxesCombined className="size-3.5" />
-              Stats
-            </button>
           </div>
         </aside>
       </div>

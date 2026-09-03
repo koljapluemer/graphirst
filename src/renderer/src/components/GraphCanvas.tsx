@@ -1,7 +1,6 @@
 import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk.bundled.js'
 import {
   Background,
-  Controls,
   MarkerType,
   Panel,
   ReactFlow,
@@ -27,6 +26,8 @@ import FloatingEdge from './FloatingEdge'
 import NoteNode, { type NoteFlowNode } from './NoteNode'
 import PaneSearchMenu from './PaneSearchMenu'
 import PendingConnectionEdge from './PendingConnectionEdge'
+import GraphToolbar from './graph-toolbar/GraphToolbar'
+import { useGraphToolbarGroups } from './graph-toolbar/useGraphToolbarGroups'
 import {
   CREATED_NOTE_PIN_DEPTH,
   MANUAL_PIN_DEPTH,
@@ -80,6 +81,9 @@ interface GraphCanvasProps {
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
+  onClearPins: () => void
+  onPinRandomOrphan: () => void
+  pinRandomOrphanBusy: boolean
 }
 
 interface LayoutedNode {
@@ -150,6 +154,8 @@ function layoutHeightsDrifted(
 
 const selectMeasuredHeightSignature = (state: ReactFlowState): string =>
   measuredHeightSignature(collectMeasuredHeights(state.nodeLookup.values()))
+
+const selectDomNode = (state: ReactFlowState): HTMLDivElement | null => state.domNode
 
 /**
  * What the user is currently doing on the canvas, beyond just looking at it.
@@ -408,15 +414,22 @@ function FlowScene({
   pins,
   onPinNote,
   onUnpinNote,
-  onSetPinDepth
+  onSetPinDepth,
+  onClearPins,
+  onPinRandomOrphan,
+  pinRandomOrphanBusy
 }: {
   graph: NoteGraph
   pins: ReadonlyMap<string, number>
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
+  onClearPins: () => void
+  onPinRandomOrphan: () => void
+  pinRandomOrphanBusy: boolean
 }): React.JSX.Element {
   const { fitView, screenToFlowPosition, getNodes } = useReactFlow()
+  const domNode = useStore(selectDomNode)
   const nodesInitialized = useNodesInitialized()
   // Reactive signal: changes whenever any card's measured height changes, so the
   // measured-height layout pass below re-runs when a card grows (body edit, an
@@ -629,22 +642,39 @@ function FlowScene({
     [screenToFlowPosition]
   )
 
+  // Opens a freestanding (unconnected) draft note at a screen point - shared by
+  // the double-click gesture and the toolbar's "Add note" button.
+  const openFreestandingDraft = useCallback(
+    (screenPoint: { x: number; y: number }) => {
+      setInteraction({
+        type: 'draft',
+        clientId: `draft:orphan:${Date.now()}`,
+        sourceFilename: null,
+        position: screenToFlowPosition(screenPoint)
+      })
+    },
+    [screenToFlowPosition]
+  )
+
   const handlePaneDoubleClick = useCallback(
     (event: ReactMouseEvent) => {
       const target = event.target as HTMLElement
       if (!target.classList.contains('react-flow__pane')) {
         return
       }
-
-      setInteraction({
-        type: 'draft',
-        clientId: `draft:orphan:${Date.now()}`,
-        sourceFilename: null,
-        position: screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      })
+      openFreestandingDraft({ x: event.clientX, y: event.clientY })
     },
-    [screenToFlowPosition]
+    [openFreestandingDraft]
   )
+
+  const handleAddNote = useCallback(() => {
+    const rect = domNode?.getBoundingClientRect()
+    openFreestandingDraft(
+      rect
+        ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+    )
+  }, [domNode, openFreestandingDraft])
 
   const handlePaneContextMenu = useCallback((event: ReactMouseEvent | MouseEvent) => {
     event.preventDefault()
@@ -846,6 +876,14 @@ function FlowScene({
     ]
   )
 
+  const toolbarGroups = useGraphToolbarGroups({
+    onAddNote: handleAddNote,
+    onUnpinAll: onClearPins,
+    onPinOrphan: onPinRandomOrphan,
+    unpinAllDisabled: pins.size === 0,
+    pinOrphanDisabled: pinRandomOrphanBusy
+  })
+
   return (
     <ReactFlow
       fitView
@@ -880,7 +918,9 @@ function FlowScene({
       }}
     >
       <Background gap={28} color={GRAPH_COLORS.base300} />
-      <Controls showInteractive={false} />
+      <Panel position="top-left">
+        <GraphToolbar groups={toolbarGroups} />
+      </Panel>
       {graph.nodes.length === 0 && interaction.type === 'idle' ? (
         <Panel position="top-center">
           <div className="pointer-events-none rounded-full border border-base-300 bg-base-100/90 px-4 py-2 text-sm text-base-content/70 shadow-lg">
@@ -920,7 +960,10 @@ export default function GraphCanvas({
   pins,
   onPinNote,
   onUnpinNote,
-  onSetPinDepth
+  onSetPinDepth,
+  onClearPins,
+  onPinRandomOrphan,
+  pinRandomOrphanBusy
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph) {
     return (
@@ -942,6 +985,9 @@ export default function GraphCanvas({
           onPinNote={onPinNote}
           onUnpinNote={onUnpinNote}
           onSetPinDepth={onSetPinDepth}
+          onClearPins={onClearPins}
+          onPinRandomOrphan={onPinRandomOrphan}
+          pinRandomOrphanBusy={pinRandomOrphanBusy}
         />
       </ReactFlowProvider>
     </div>

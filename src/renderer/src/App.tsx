@@ -92,7 +92,7 @@ function App(): React.JSX.Element {
   // instead of each call site remembering to poke the graph *and* the search results.
   useEffect(() => {
     return window.api.notes.onChanged(() => {
-      refetch()
+      refetch({ background: true })
     })
   }, [refetch])
 
@@ -290,7 +290,9 @@ function App(): React.JSX.Element {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h3 className="text-xl font-semibold">Graph folder</h3>
-              <p className="mt-2 text-sm leading-6 text-base-content/70">{bootstrap?.graphPath}</p>
+              <p className="mt-2 text-sm leading-6 text-base-content/70">
+                {bootstrap?.graphPath || 'No folder selected'}
+              </p>
             </div>
             <button
               type="button"
@@ -344,11 +346,13 @@ function UnavailableState({
   onOpenSettings: () => void
 }): React.JSX.Element {
   const title =
-    bootstrap?.status === 'missing-directory'
-      ? 'Graph folder not found'
-      : bootstrap?.status === 'empty'
-        ? 'No notes indexed yet'
-        : 'Graph unavailable'
+    bootstrap?.status === 'no-folder'
+      ? 'Choose your notes folder'
+      : bootstrap?.status === 'missing-directory'
+        ? 'Graph folder not found'
+        : bootstrap?.status === 'empty'
+          ? 'No notes indexed yet'
+          : 'Graph unavailable'
 
   const message = bootstrap?.message ?? 'Choose the folder that contains your JSON notes.'
 

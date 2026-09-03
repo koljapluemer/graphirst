@@ -43,7 +43,26 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations')
 }
 
+/** How often to run the drift-recovery reconcile while a window is open. */
+const RECONCILE_INTERVAL_MS = 5 * 60_000
+/** Minimum gap between focus-triggered reconciles, so rapid window switching isn't a scan storm. */
+const RECONCILE_FOCUS_THROTTLE_MS = 10_000
+
 let noteStore: NoteStore
+let lastReconcileAt = 0
+
+/** Best-effort: recover from any filesystem event the OS dropped. Cheap and idempotent. */
+function requestReconcile(): void {
+  if (!noteStore) {
+    return
+  }
+  const now = Date.now()
+  if (now - lastReconcileAt < RECONCILE_FOCUS_THROTTLE_MS) {
+    return
+  }
+  lastReconcileAt = now
+  void noteStore.reconcile()
+}
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -65,6 +84,8 @@ function createWindow(): void {
     mainWindow.maximize()
     mainWindow.show()
   })
+
+  mainWindow.on('focus', requestReconcile)
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -100,6 +121,8 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  setInterval(requestReconcile, RECONCILE_INTERVAL_MS).unref()
+
   // Serves note-attached images straight out of <graphPath>/images - reads the graph
   // path fresh on every request (rather than capturing it once) since it can change
   // at runtime via pickDirectory/setGraphPath. The filename rides in the URL path,
@@ -115,8 +138,13 @@ app.whenReady().then(() => {
       return new Response(null, { status: 404 })
     }
 
+    const graphPath = noteStore.getCurrentPath()
+    if (!graphPath) {
+      return new Response(null, { status: 404 })
+    }
+
     try {
-      const data = await readFile(join(noteStore.getCurrentPath(), 'images', filename))
+      const data = await readFile(join(graphPath, 'images', filename))
       return new Response(data, { headers: { 'content-type': mimeType } })
     } catch {
       return new Response(null, { status: 404 })
@@ -191,7 +219,7 @@ app.whenReady().then(() => {
   ipcMain.handle('notes:pick-directory', async () => {
     const selection = await dialog.showOpenDialog({
       title: 'Choose graph folder',
-      defaultPath: noteStore.getCurrentPath(),
+      defaultPath: noteStore.getCurrentPath() || app.getPath('home'),
       properties: ['openDirectory', 'createDirectory']
     })
 
@@ -207,6 +235,10 @@ app.whenReady().then(() => {
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  void noteStore?.dispose()
 })
 
 app.on('window-all-closed', () => {

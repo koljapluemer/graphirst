@@ -16,7 +16,8 @@ export interface UseNoteGraphResult {
   unpinNote: (filename: string) => void
   setPinDepth: (filename: string, depth: number) => void
   clearPins: () => void
-  refetch: () => void
+  /** `background: true` refreshes the graph without showing the loading overlay - for silent "notes changed on disk" refetches. */
+  refetch: (opts?: { background?: boolean }) => void
 }
 
 /**
@@ -31,10 +32,13 @@ export function useNoteGraph(): UseNoteGraphResult {
   const [error, setError] = useState<string | null>(null)
   const [refetchNonce, setRefetchNonce] = useState(0)
   const requestIdRef = useRef(0)
+  const backgroundRef = useRef(false)
 
   useEffect(() => {
     let ignore = false
     const requestId = ++requestIdRef.current
+    const isBackground = backgroundRef.current
+    backgroundRef.current = false
 
     const run = async (): Promise<void> => {
       if (pins.size === 0) {
@@ -42,7 +46,9 @@ export function useNoteGraph(): UseNoteGraphResult {
         return
       }
 
-      setLoading(true)
+      if (!isBackground) {
+        setLoading(true)
+      }
       try {
         const response = await window.api.notes.openGraph(toPinSpecs(pins))
         if (ignore || requestId !== requestIdRef.current) {
@@ -92,7 +98,10 @@ export function useNoteGraph(): UseNoteGraphResult {
   }, [])
 
   const clearPins = useCallback(() => setPins(new Map()), [])
-  const refetch = useCallback(() => setRefetchNonce((n) => n + 1), [])
+  const refetch = useCallback((opts?: { background?: boolean }) => {
+    backgroundRef.current = opts?.background ?? false
+    setRefetchNonce((n) => n + 1)
+  }, [])
 
   return { graph, pins, loading, error, pinNote, unpinNote, setPinDepth, clearPins, refetch }
 }

@@ -8,3 +8,5 @@ Assume the user to be NOT STUPID. If you get a bug report, do not assume "The us
 Do not run dev servers. Do not drive the UI. Do not take screenshots. Do not write 1000 LoC playwright scripts. When fixing visual problems, ASK THE USER.
 
 Use tailwind+daisy, overwrite patterns with custom CSS and bespoke config ONLY when absolutely necessary.
+
+Do not write to git. Not branches, not commits, not pushes, not pulls. If git write commands need to be run, ask the user.

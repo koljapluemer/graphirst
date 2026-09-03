@@ -6,8 +6,8 @@ For now, two simple components:
 Left, the main graph view. Right, a sidebar where we can search for notes (by body, some basic smart search), and click on them to open them in the graph.
 "Open" means: Render note in the center, and show relationships w/ depth 2 around it.
 
-Source of truth: Folder of JSONs on disk, path for now: /home/brokkoli/Sync/Graph
-Make path configurable via an icon-button controlled modal.
+Source of truth: a folder of JSON notes on disk. The user selects this folder via an
+icon-button controlled settings modal; there is no built-in default path.
 
 files all have a shape like this:
 ```

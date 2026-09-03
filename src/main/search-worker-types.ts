@@ -7,6 +7,10 @@ export interface RawSearchCorpusEntry {
 
 export type RawSearchWorkerRequest =
   | { type: 'sync'; corpus: RawSearchCorpusEntry[] }
+  /** Add or replace entries, keyed by filename. */
+  | { type: 'upsert'; entries: RawSearchCorpusEntry[] }
+  /** Drop entries by filename. */
+  | { type: 'remove'; filenames: string[] }
   | {
       type: 'search'
       requestId: number

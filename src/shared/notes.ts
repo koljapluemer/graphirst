@@ -114,8 +114,9 @@ export interface IndexProgress {
 }
 
 export interface NotesBootstrap {
+  /** Empty string until the user has chosen a folder (status 'no-folder'). */
   graphPath: string
-  status: 'ready' | 'missing-directory' | 'empty' | 'error'
+  status: 'ready' | 'no-folder' | 'missing-directory' | 'empty' | 'error'
   message?: string
   stats: IndexStats | null
   pins?: PinSpec[]

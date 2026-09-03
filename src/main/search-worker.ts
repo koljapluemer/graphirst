@@ -17,6 +17,33 @@ import type {
  */
 
 let corpus: RawSearchCorpusEntry[] = []
+/** filename -> its index in `corpus`, kept in step so upsert/remove are O(1) lookups. */
+let indexByFilename = new Map<string, number>()
+
+function reindex(): void {
+  indexByFilename = new Map(corpus.map((entry, index) => [entry.filename, index]))
+}
+
+function upsertEntries(entries: RawSearchCorpusEntry[]): void {
+  for (const entry of entries) {
+    const at = indexByFilename.get(entry.filename)
+    if (at === undefined) {
+      indexByFilename.set(entry.filename, corpus.length)
+      corpus.push(entry)
+    } else {
+      corpus[at] = entry
+    }
+  }
+}
+
+function removeEntries(filenames: string[]): void {
+  const drop = new Set(filenames)
+  if (!filenames.some((filename) => indexByFilename.has(filename))) {
+    return
+  }
+  corpus = corpus.filter((entry) => !drop.has(entry.filename))
+  reindex()
+}
 
 interface FieldMatch {
   index: number
@@ -84,10 +111,19 @@ function runSearch(
 }
 
 parentPort?.on('message', (message: RawSearchWorkerRequest) => {
-  if (message.type === 'sync') {
-    corpus = message.corpus
-    return
+  switch (message.type) {
+    case 'sync':
+      corpus = message.corpus
+      reindex()
+      return
+    case 'upsert':
+      upsertEntries(message.entries)
+      return
+    case 'remove':
+      removeEntries(message.filenames)
+      return
+    case 'search':
+      runSearch(message.requestId, message.pattern, message.isRegex, message.flags, message.limit)
+      return
   }
-
-  runSearch(message.requestId, message.pattern, message.isRegex, message.flags, message.limit)
 })

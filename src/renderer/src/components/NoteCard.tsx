@@ -111,7 +111,18 @@ export default function NoteCard({
         <img src={mediaUrl(note.image)} alt="" className="mb-3 h-auto w-full rounded-box" />
       ) : null}
 
-      <div className="prose prose-sm max-w-none prose-code:before:content-none prose-code:after:content-none">
+      <div
+        className={[
+          'prose prose-sm max-w-none',
+          'prose-code:before:content-none prose-code:after:content-none',
+          // Blockquotes: keep the accent bar + a subtle fill, drop the plugin's
+          // bold + italic styling and the auto-inserted curly quote marks.
+          'prose-blockquote:font-normal prose-blockquote:not-italic',
+          'prose-blockquote:rounded-box prose-blockquote:bg-base-200/60 prose-blockquote:py-2 prose-blockquote:pr-4',
+          '[&_blockquote_p:first-of-type::before]:content-none',
+          '[&_blockquote_p:last-of-type::after]:content-none'
+        ].join(' ')}
+      >
         {note.body.trim() ? (
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}

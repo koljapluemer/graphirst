@@ -1,0 +1,1 @@
+stop blockquotes from being bold, italic and wrapped in `"` (just keep the bar and maybe subtle background color)

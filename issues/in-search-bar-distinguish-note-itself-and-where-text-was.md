@@ -1,0 +1,1 @@
+in search bar, distinguish note itself and where text was found

@@ -1,4 +1,4 @@
-import type { Edge, XYPosition } from '@xyflow/react'
+import type { Edge } from '@xyflow/react'
 import type { ImageState } from './DraftNoteCard'
 import type { NoteFlowNode } from './NoteNode'
 import { mergeRelationsIntoEdges } from './graph-edges'
@@ -54,11 +54,16 @@ export interface ViewCallbacks {
 
 /**
  * The single place where the server-derived graph, the ELK layout, the current
- * pin state, the user's dragged positions and the current in-progress
- * interaction are merged into what actually gets handed to <ReactFlow>. Kept as
- * a pure function of its inputs so this merge logic can be reasoned about
- * independently of React's render cycle; `useGraphNodes` runs it in an effect
- * and reconciles the result into React Flow's node state.
+ * pin state and the current in-progress interaction are merged into what
+ * actually gets handed to <ReactFlow>. Kept as a pure function of its inputs so
+ * this merge logic can be reasoned about independently of React's render cycle;
+ * `useGraphNodes` runs it in an effect and reconciles the result into React
+ * Flow's node state.
+ *
+ * `layouted` is authoritative for every node's position - including ones the
+ * user has dragged. Those are pinned and separated inside the layout layer (see
+ * getLayoutedGraph / separateOverlaps and useElkLayout's applyManualDrop), so
+ * there is nothing to override here.
  *
  * The backend graph is authoritative for what notes/relations exist - there is
  * no client-side patch layer here, since a pinned note is a real BFS root on the
@@ -68,7 +73,6 @@ export function buildView(
   graph: NoteGraph,
   layouted: LayoutedGraph,
   pins: ReadonlyMap<string, number>,
-  manualPositions: ReadonlyMap<string, XYPosition>,
   interaction: Interaction,
   anchorFilename: string | null,
   callbacks: ViewCallbacks
@@ -81,7 +85,7 @@ export function buildView(
     const shared = {
       id: item.note.filename,
       type: 'note' as const,
-      position: manualPositions.get(item.note.filename) ?? item.position,
+      position: item.position,
       width: item.width,
       selectable: true,
       className: NODE_CLASS_NAME
@@ -131,12 +135,7 @@ export function buildView(
   })
 
   const knownFilenames = new Set(nodes.map((node) => node.id))
-  const positions = new Map(
-    layouted.nodes.map((item) => [
-      item.note.filename,
-      manualPositions.get(item.note.filename) ?? item.position
-    ])
-  )
+  const positions = new Map(layouted.nodes.map((item) => [item.note.filename, item.position]))
 
   // An edge can reference a node the backend dropped after hitting its graph-size cap
   // (the edge is registered before its far endpoint's node-cap check runs) - filter

@@ -22,12 +22,14 @@ export interface UseGraphNodesParams {
   interaction: Interaction
   anchorFilename: string | null
   callbacks: ViewCallbacks
-  /** Notes the user has dragged, by filename. Written here on drag end, read by ELK + buildView. */
+  /** Notes the user has dragged, by filename. Written here on drag end; pinned by the layout. */
   manualPositionsRef: RefObject<Map<string, XYPosition>>
-  /** True while a node drag is in progress - the view sync is suspended so it never clobbers the live drag. */
+  /** True while a pointer drag is in progress - the view sync is suspended so it can't fight it. */
   dragging: boolean
   onDragStart: () => void
   onDragStop: () => void
+  /** Re-pins every manual position and separates neighbours around them (no ELK run). */
+  onManualDrop: () => void
 }
 
 export interface UseGraphNodesResult {
@@ -59,7 +61,8 @@ export function useGraphNodes({
   manualPositionsRef,
   dragging,
   onDragStart,
-  onDragStop
+  onDragStop,
+  onManualDrop
 }: UseGraphNodesParams): UseGraphNodesResult {
   const [nodes, setNodes, onNodesChange] = useNodesState<NoteFlowNode>(EMPTY_NODES)
   // Edges are plain state: they carry no interaction changes we round-trip
@@ -69,9 +72,9 @@ export function useGraphNodes({
   const lastGraphRef = useRef<NoteGraph | null>(null)
   const lastCallbacksRef = useRef<ViewCallbacks | null>(null)
 
-  // Sync the derived view into React Flow's node/edge state. Suspended mid-drag
-  // (`dragging`) and re-run when the drag ends, so the final dropped position -
-  // by then recorded in `manualPositionsRef` - is baked into the view.
+  // Sync the derived view into React Flow's node/edge state. Suspended during a
+  // drag; `onManualDrop` has already patched `layouted` with the dropped position
+  // by the time this re-runs on drag-end, so the released card doesn't snap back.
   useEffect(() => {
     const reuseIdentity = lastGraphRef.current === graph && lastCallbacksRef.current === callbacks
     lastGraphRef.current = graph
@@ -81,28 +84,10 @@ export function useGraphNodes({
       return
     }
 
-    const view = buildView(
-      graph,
-      layouted,
-      pins,
-      manualPositionsRef.current,
-      interaction,
-      anchorFilename,
-      callbacks
-    )
+    const view = buildView(graph, layouted, pins, interaction, anchorFilename, callbacks)
     setNodes((current) => reconcileNodes(current, view.nodes, reuseIdentity))
     setEdges((current) => reconcileEdges(current, view.edges, reuseIdentity))
-  }, [
-    graph,
-    layouted,
-    pins,
-    interaction,
-    anchorFilename,
-    callbacks,
-    dragging,
-    manualPositionsRef,
-    setNodes
-  ])
+  }, [graph, layouted, pins, interaction, anchorFilename, callbacks, dragging, setNodes])
 
   // A dragged position lives only while the note is on the canvas - forget it
   // once the note leaves the graph, so a re-pinned note returns to a freshly
@@ -124,10 +109,13 @@ export function useGraphNodes({
     (_event, node) => {
       if (node.type === 'note' && !node.id.startsWith(DRAFT_ID_PREFIX)) {
         manualPositionsRef.current.set(node.id, { x: node.position.x, y: node.position.y })
+        // Patch the layout in place with the drop position + a separation pass,
+        // then let the view sync resume - the card stays exactly where released.
+        onManualDrop()
       }
       onDragStop()
     },
-    [manualPositionsRef, onDragStop]
+    [manualPositionsRef, onDragStop, onManualDrop]
   )
 
   return { nodes, edges, onNodesChange, onNodeDragStart, onNodeDragStop }

@@ -59,9 +59,10 @@ function FlowScene({
 }: FlowSceneProps): React.JSX.Element {
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
 
-  // The drag flag has a single owner here: a ref for the layout hook's async
-  // guards, mirrored to state so effects that must pause/resume around a drag
-  // can react to it.
+  // Drag lifecycle, owned here so the layout and node hooks stay in step.
+  // `dragging` pauses the node-view sync and both ELK passes; `isDraggingRef` is
+  // the same flag for the layout hook's async guards. On drop, useGraphNodes
+  // patches the layout via `applyManualDrop` - no ELK re-run.
   const manualPositionsRef = useRef<Map<string, XYPosition>>(new Map())
   const isDraggingRef = useRef(false)
   const [dragging, setDragging] = useState(false)
@@ -75,7 +76,7 @@ function FlowScene({
     setDragging(false)
   }, [])
 
-  const { layouted, anchorFilename, markInteraction } = useElkLayout({
+  const { layouted, anchorFilename, markInteraction, applyManualDrop } = useElkLayout({
     graph,
     pins,
     interactionType: interaction.type,
@@ -114,7 +115,8 @@ function FlowScene({
     manualPositionsRef,
     dragging,
     onDragStart: beginDrag,
-    onDragStop: endDrag
+    onDragStop: endDrag,
+    onManualDrop: applyManualDrop
   })
 
   const toolbarGroups = useGraphToolbarGroups({

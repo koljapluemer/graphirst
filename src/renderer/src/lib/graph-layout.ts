@@ -100,14 +100,105 @@ export function layoutHeightsDrifted(
   })
 }
 
+// Clearance (px) forced between two card rectangles by separateOverlaps. Roughly
+// ELK's own `elk.spacing.nodeNode`, so post-ELK separation and ELK's spacing
+// agree on what "not overlapping" means.
+const SEPARATION_MARGIN = 56
+// Safety cap - card-sized boxes with local pushes settle well inside this.
+const SEPARATION_ITERATIONS = 60
+
+/**
+ * Nudges overlapping cards apart along their axis of least penetration, leaving
+ * `pinned` nodes fixed (movable neighbours yield to them). ELK's `layered` won't
+ * honour a dragged node's coordinate, so we pin it here and let this open space
+ * around it; it also cleans up the residual overlaps ELK leaves from height
+ * estimate drift or from a disconnected cluster seeded onto existing content.
+ *
+ * Pure: returns the same array when nothing overlaps.
+ */
+export function separateOverlaps(
+  nodes: LayoutedNode[],
+  pinned: ReadonlySet<string>,
+  margin = SEPARATION_MARGIN
+): LayoutedNode[] {
+  if (nodes.length < 2) {
+    return nodes
+  }
+
+  const pos = nodes.map((node) => ({ x: node.position.x, y: node.position.y }))
+  const halfW = nodes.map((node) => node.width / 2 + margin / 2)
+  const halfH = nodes.map((node) => node.height / 2 + margin / 2)
+  const fixed = nodes.map((node) => pinned.has(node.note.filename))
+  let moved = false
+
+  for (let iteration = 0; iteration < SEPARATION_ITERATIONS; iteration += 1) {
+    let anyOverlap = false
+
+    for (let i = 0; i < nodes.length; i += 1) {
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const dx = pos[j].x - pos[i].x
+        const dy = pos[j].y - pos[i].y
+        const penX = halfW[i] + halfW[j] - Math.abs(dx)
+        const penY = halfH[i] + halfH[j] - Math.abs(dy)
+        if (penX <= 0 || penY <= 0) {
+          continue
+        }
+        if (fixed[i] && fixed[j]) {
+          // Two pinned cards the user parked on top of each other - their call.
+          continue
+        }
+
+        anyOverlap = true
+        moved = true
+
+        // Resolve along whichever axis needs the smaller shove. `|| 1` breaks the
+        // tie when two centres coincide exactly.
+        let shiftX = 0
+        let shiftY = 0
+        if (penX < penY) {
+          shiftX = (dx < 0 ? -1 : 1) * penX || 1
+        } else {
+          shiftY = (dy < 0 ? -1 : 1) * penY || 1
+        }
+
+        if (fixed[i]) {
+          pos[j].x += shiftX
+          pos[j].y += shiftY
+        } else if (fixed[j]) {
+          pos[i].x -= shiftX
+          pos[i].y -= shiftY
+        } else {
+          pos[i].x -= shiftX / 2
+          pos[i].y -= shiftY / 2
+          pos[j].x += shiftX / 2
+          pos[j].y += shiftY / 2
+        }
+      }
+    }
+
+    if (!anyOverlap) {
+      break
+    }
+  }
+
+  if (!moved) {
+    return nodes
+  }
+  return nodes.map((node, i) =>
+    pos[i].x === node.position.x && pos[i].y === node.position.y
+      ? node
+      : { ...node, position: pos[i] }
+  )
+}
+
 /**
  * Runs ELK over the current graph and returns each note's absolute position.
  *
  * - `previousLayout` seeds ELK's interactive mode so unrelated nodes stay put
  *   across graph changes.
- * - `manualPositions` (notes the user dragged) are merged over that seed, so
- *   neighbours are placed around a moved node rather than ELK relocating it -
- *   the moved node's own rendered position is pinned downstream in buildView.
+ * - `manualPositions` (notes the user dragged) override ELK's coordinate for
+ *   those notes and pin them through the final separateOverlaps pass, so a
+ *   dragged card keeps its spot and its neighbours open space around it.
  * - `measuredHeights` is supplied on the second pass; the first pass falls back
  *   to estimateNodeHeight().
  */
@@ -200,6 +291,18 @@ export async function getLayoutedGraph(
     ])
   )
 
+  // `layered` ignores a seed coordinate for placement, so put dragged notes back
+  // where the user left them and pin them through the separation pass below.
+  const pinned = new Set<string>()
+  if (manualPositions) {
+    for (const [filename, position] of manualPositions) {
+      if (knownFilenames.has(filename)) {
+        positions.set(filename, position)
+        pinned.add(filename)
+      }
+    }
+  }
+
   const layoutedNodes: LayoutedNode[] = graph.nodes.map((note) => ({
     note,
     position: positions.get(note.filename) ?? { x: 0, y: 0 },
@@ -207,7 +310,7 @@ export async function getLayoutedGraph(
     height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
   }))
 
-  return { nodes: layoutedNodes }
+  return { nodes: separateOverlaps(layoutedNodes, pinned) }
 }
 
 // First-paint height allowance for a card with an attached image. NoteCard

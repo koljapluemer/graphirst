@@ -64,6 +64,10 @@ const LAYOUT_HEIGHT_TOLERANCE = 8
 /** Minimal shape shared by React Flow's public `Node` and its `InternalNode`. */
 export type MeasuredNode = { id: string; type?: string; measured?: { height?: number } }
 
+// Quantum (px) the measured heights are snapped to. Coarse enough that sub-pixel
+// render jitter can't flip the height signature and retrigger the layout pass.
+const MEASURED_HEIGHT_QUANTUM = 2
+
 /**
  * Per-`note`-node measured heights, keyed by filename (which is the node id).
  * Draft/edit cards are excluded - they are placed by hand, not by ELK.
@@ -72,7 +76,10 @@ export function collectMeasuredHeights(nodes: Iterable<MeasuredNode>): Map<strin
   const heights = new Map<string, number>()
   for (const node of nodes) {
     if (node.type === 'note' && node.measured?.height) {
-      heights.set(node.id, Math.round(node.measured.height))
+      heights.set(
+        node.id,
+        Math.round(node.measured.height / MEASURED_HEIGHT_QUANTUM) * MEASURED_HEIGHT_QUANTUM
+      )
     }
   }
   return heights
@@ -184,11 +191,13 @@ export function separateOverlaps(
   if (!moved) {
     return nodes
   }
-  return nodes.map((node, i) =>
-    pos[i].x === node.position.x && pos[i].y === node.position.y
-      ? node
-      : { ...node, position: pos[i] }
-  )
+  // Snap to whole pixels: fractional coordinates make cards render on sub-pixel
+  // boundaries, whose measured height jitters and retriggers the layout pass.
+  return nodes.map((node, i) => {
+    const x = Math.round(pos[i].x)
+    const y = Math.round(pos[i].y)
+    return x === node.position.x && y === node.position.y ? node : { ...node, position: { x, y } }
+  })
 }
 
 /**
@@ -285,8 +294,9 @@ export async function getLayoutedGraph(
     children.map((node) => [
       node.id,
       {
-        x: (node.x ?? 0) + (node.width ?? NODE_WIDTH) / 2,
-        y: (node.y ?? 0) + (node.height ?? NODE_MIN_HEIGHT) / 2
+        // Whole pixels only - see the snap note in separateOverlaps.
+        x: Math.round((node.x ?? 0) + (node.width ?? NODE_WIDTH) / 2),
+        y: Math.round((node.y ?? 0) + (node.height ?? NODE_MIN_HEIGHT) / 2)
       }
     ])
   )

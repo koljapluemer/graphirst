@@ -108,7 +108,12 @@ export function useGraphNodes({
   const onNodeDragStop = useCallback<OnNodeDrag<NoteFlowNode>>(
     (_event, node) => {
       if (node.type === 'note' && !node.id.startsWith(DRAFT_ID_PREFIX)) {
-        manualPositionsRef.current.set(node.id, { x: node.position.x, y: node.position.y })
+        // Whole pixels: a card on a sub-pixel x re-measures its height and
+        // retriggers the layout pass (see separateOverlaps).
+        manualPositionsRef.current.set(node.id, {
+          x: Math.round(node.position.x),
+          y: Math.round(node.position.y)
+        })
         // Patch the layout in place with the drop position + a separation pass,
         // then let the view sync resume - the card stays exactly where released.
         onManualDrop()

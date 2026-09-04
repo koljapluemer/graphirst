@@ -1,4 +1,4 @@
-import { ExternalLink, FileText, Pencil, Trash2, X } from 'lucide-react'
+import { ExternalLink, FileText, GripVertical, Pencil, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -61,12 +61,25 @@ export default function NoteCard({
       ].join(' ')}
     >
       <div className="mb-3 flex min-h-6 items-center justify-between">
-        <PinControl
-          pinDepth={pinDepth}
-          onPin={() => onPin(note.filename)}
-          onUnpin={() => onUnpin(note.filename)}
-          onChangeDepth={(next) => onChangeDepth(note.filename, next)}
-        />
+        <div className="flex items-center gap-1.5">
+          {/*
+            The only drag surface for the node - React Flow's `dragHandle` on the
+            note node points at this class (see GraphCanvas' buildView), so the
+            rest of the card stays free for text selection and its buttons.
+          */}
+          <span
+            className="note-drag-handle -ml-1 cursor-grab rounded p-0.5 text-base-content/30 transition-colors hover:text-base-content/60 active:cursor-grabbing"
+            title="Drag to move"
+          >
+            <GripVertical className="size-4" />
+          </span>
+          <PinControl
+            pinDepth={pinDepth}
+            onPin={() => onPin(note.filename)}
+            onUnpin={() => onUnpin(note.filename)}
+            onChangeDepth={(next) => onChangeDepth(note.filename, next)}
+          />
+        </div>
         <div className="flex items-center gap-1">
           <button
             type="button"

@@ -6,7 +6,7 @@ import {
   type EdgeProps
 } from '@xyflow/react'
 import { Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { EDGE_OVERLAY_Z_INDEX, getEdgeParams } from './graph-edge-geometry'
 import type { GraphEdgePayload } from '../../../shared/notes'
 
@@ -15,7 +15,10 @@ export interface FloatingEdgeData extends Record<string, unknown> {
   onDeleteRelation?: (relation: GraphEdgePayload) => Promise<void>
 }
 
-export default function FloatingEdge({
+// Memoized so a node drag only re-renders the edges actually touching the moved
+// node: for every other edge the props stay referentially stable (the view sync
+// is paused during a drag) and its `useInternalNode` subscriptions don't change.
+function FloatingEdge({
   id,
   source,
   target,
@@ -174,3 +177,5 @@ export default function FloatingEdge({
     </>
   )
 }
+
+export default memo(FloatingEdge)

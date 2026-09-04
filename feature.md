@@ -1,0 +1,3 @@
+- it should be possible to move nodes, using affordancenses of the library (drag and drop)
+- when the user has manually moved a node, its state should include this position and we should try not to override it when recalculating the layout, as that will be probably frustrating to the user
+    - however, this is ofc not a permanent node prop, it should only be present until the node is unpinned/otherwise disappears from view

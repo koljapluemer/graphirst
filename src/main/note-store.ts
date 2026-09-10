@@ -117,8 +117,18 @@ interface PendingNoteImage {
 
 /** The single most recent deletion, kept just long enough for the UI's undo popup to act on it. */
 type PendingUndo =
-  | { type: 'note'; filename: string; raw: string; image: PendingNoteImage | null }
+  | {
+      type: 'note'
+      filename: string
+      raw: string
+      image: PendingNoteImage | null
+      /** Notes that had `relationshipsChanged` stamped because they were wired to the deleted note - re-stamped on undo. */
+      neighbors: string[]
+    }
   | { type: 'relation'; source: string; relation: NoteRelationTuple }
+
+/** Lifecycle timestamp keys this store stamps into note files (see RawNoteFile). */
+type NoteTimestampField = 'created' | 'updated' | 'opened' | 'relationshipsChanged'
 
 interface GraphBuildContext {
   nodes: Map<string, NodeMeta>
@@ -438,6 +448,7 @@ export class NoteStore extends EventEmitter {
       throw new Error(this.message ?? 'The note index is not ready yet.')
     }
 
+    await this.stampNewlyPinned(pins)
     this.lastPins = pins
     await this.persistSettings()
 
@@ -456,9 +467,11 @@ export class NoteStore extends EventEmitter {
     }
 
     const filename = this.generateFilename()
+    const now = new Date().toISOString()
 
     if (!request.relatedFilename) {
       await this.writeNoteFile(filename, { body: request.body, rels: [] })
+      await this.stampTimestamps(filename, ['created', 'updated', 'opened'], now)
       await this.applyLocalChange({ upsert: [filename] })
       return { filename }
     }
@@ -475,9 +488,16 @@ export class NoteStore extends EventEmitter {
       await this.appendRelation(request.relatedFilename, [label, filename])
     }
 
-    await this.applyLocalChange({
-      upsert: request.reverse ? [filename] : [filename, request.relatedFilename]
-    })
+    // Both ends of the new relationship changed: the new note carries it (or is
+    // its target), and the related note gained an edge in the other direction.
+    await this.stampTimestamps(
+      filename,
+      ['created', 'updated', 'opened', 'relationshipsChanged'],
+      now
+    )
+    await this.stampTimestamps(request.relatedFilename, ['relationshipsChanged'], now)
+
+    await this.applyLocalChange({ upsert: [filename, request.relatedFilename] })
 
     return { filename, label }
   }
@@ -510,11 +530,21 @@ export class NoteStore extends EventEmitter {
       await this.deleteImageFiles(this.stemOf(request.filename))
     }
 
+    // Every surviving note wired to this one loses a relationship as it goes.
+    const neighbors = this.relationNeighbors(request.filename).filter((name) =>
+      this.notes.has(name)
+    )
+    const now = new Date().toISOString()
+    for (const neighbor of neighbors) {
+      await this.stampTimestamps(neighbor, ['relationshipsChanged'], now)
+    }
+
     this.markSelfWrite(path)
     await unlink(path)
-    this.pendingUndo = { type: 'note', filename: request.filename, raw, image }
+    this.pendingUndo = { type: 'note', filename: request.filename, raw, image, neighbors }
     await this.applyLocalChange({
       remove: [request.filename],
+      upsert: neighbors,
       imageStems: existing.image ? [this.stemOf(request.filename)] : []
     })
   }
@@ -527,12 +557,19 @@ export class NoteStore extends EventEmitter {
       throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
     }
 
+    const contentChanged =
+      existing.body !== request.body || existing.extraContent !== request.extraContent
+    const now = new Date().toISOString()
+
     await this.mutateRawNote(request.filename, (parsed) => {
       parsed.body = request.body
       if (request.extraContent.trim().length > 0) {
         parsed.extra = request.extraContent
       } else {
         delete parsed.extra
+      }
+      if (contentChanged) {
+        this.applyTimestampStamp(parsed, ['updated', 'opened'], now)
       }
     })
 
@@ -599,7 +636,12 @@ export class NoteStore extends EventEmitter {
 
     const label = request.label.trim() || 'related'
     await this.appendRelation(request.source, [label, request.target])
-    await this.applyLocalChange({ upsert: [request.source] })
+
+    const now = new Date().toISOString()
+    await this.stampTimestamps(request.source, ['relationshipsChanged'], now)
+    await this.stampTimestamps(request.target, ['relationshipsChanged'], now)
+
+    await this.applyLocalChange({ upsert: [request.source, request.target] })
 
     return { label }
   }
@@ -615,7 +657,14 @@ export class NoteStore extends EventEmitter {
       }
       rels[index] = [request.nextLabel.trim() || request.label, request.target]
     })
-    await this.applyLocalChange({ upsert: [request.source] })
+
+    const now = new Date().toISOString()
+    await this.stampTimestamps(request.source, ['relationshipsChanged'], now)
+    if (this.notes.has(request.target)) {
+      await this.stampTimestamps(request.target, ['relationshipsChanged'], now)
+    }
+
+    await this.applyLocalChange({ upsert: [request.source, request.target] })
   }
 
   async deleteRelation(request: DeleteRelationRequest): Promise<void> {
@@ -632,8 +681,14 @@ export class NoteStore extends EventEmitter {
       rels.splice(index, 1)
     })
 
+    const now = new Date().toISOString()
+    await this.stampTimestamps(request.source, ['relationshipsChanged'], now)
+    if (this.notes.has(request.target)) {
+      await this.stampTimestamps(request.target, ['relationshipsChanged'], now)
+    }
+
     this.pendingUndo = { type: 'relation', source: request.source, relation: removed! }
-    await this.applyLocalChange({ upsert: [request.source] })
+    await this.applyLocalChange({ upsert: [request.source, request.target] })
   }
 
   async undoDelete(): Promise<UndoDeleteResponse> {
@@ -654,13 +709,31 @@ export class NoteStore extends EventEmitter {
         this.markSelfWrite(imagePath)
         await writeFile(imagePath, pending.image.data)
       }
+
+      // The relationships that vanished with the note are back - re-stamp the
+      // same set the delete stamped, plus the note itself now that it exists.
+      const now = new Date().toISOString()
+      const revived = pending.neighbors.filter((name) => this.notes.has(name))
+      await this.stampTimestamps(pending.filename, ['relationshipsChanged'], now)
+      for (const neighbor of revived) {
+        await this.stampTimestamps(neighbor, ['relationshipsChanged'], now)
+      }
+
       await this.applyLocalChange({
-        upsert: [pending.filename],
+        upsert: [pending.filename, ...revived],
         imageStems: pending.image ? [this.stemOf(pending.filename)] : []
       })
     } else {
       await this.appendRelation(pending.source, pending.relation)
-      await this.applyLocalChange({ upsert: [pending.source] })
+
+      const now = new Date().toISOString()
+      const [, target] = pending.relation
+      await this.stampTimestamps(pending.source, ['relationshipsChanged'], now)
+      if (this.notes.has(target)) {
+        await this.stampTimestamps(target, ['relationshipsChanged'], now)
+      }
+
+      await this.applyLocalChange({ upsert: [pending.source, target] })
     }
 
     return { restored: true }
@@ -713,6 +786,7 @@ export class NoteStore extends EventEmitter {
       throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
     }
 
+    const now = new Date().toISOString()
     await this.mutateRawNote(request.filename, (parsed) => {
       const notes = Array.isArray(parsed.notes) ? (parsed.notes as unknown[]) : []
       if (request.index < 0 || request.index >= notes.length) {
@@ -724,6 +798,7 @@ export class NoteStore extends EventEmitter {
       } else {
         delete parsed.notes
       }
+      this.applyTimestampStamp(parsed, ['updated', 'opened'], now)
     })
 
     await this.applyLocalChange({ upsert: [request.filename] })
@@ -1425,7 +1500,11 @@ export class NoteStore extends EventEmitter {
         image,
         extraContent,
         extraCompact: extraContent.replace(/\s+/g, ' ').trim(),
-        notes
+        notes,
+        created: this.readTimestamp(parsed.created),
+        updated: this.readTimestamp(parsed.updated),
+        opened: this.readTimestamp(parsed.opened),
+        relationshipsChanged: this.readTimestamp(parsed.relationshipsChanged)
       }
     } catch (error) {
       console.warn(`Skipping unreadable note ${filename}:`, error)
@@ -1934,7 +2013,11 @@ export class NoteStore extends EventEmitter {
       extraContent: note.extraContent,
       depth: meta.depth,
       degree: note.degree,
-      notes: note.notes
+      notes: note.notes,
+      created: note.created,
+      updated: note.updated,
+      opened: note.opened,
+      relationshipsChanged: note.relationshipsChanged
     }
   }
 
@@ -1986,6 +2069,77 @@ export class NoteStore extends EventEmitter {
     await this.mutateRelations(filename, (rels) => {
       rels.push(relation)
     })
+  }
+
+  private readTimestamp(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value : null
+  }
+
+  /**
+   * Writes `now` into each named lifecycle timestamp on an already-parsed note
+   * body. `created` is write-once - a note that already carries one keeps it.
+   * Operates on the parsed object so callers that are already inside a
+   * `mutateRawNote` pass can stamp without a second read-modify-write.
+   */
+  private applyTimestampStamp(
+    parsed: Record<string, unknown>,
+    fields: readonly NoteTimestampField[],
+    now: string
+  ): void {
+    for (const field of fields) {
+      if (field === 'created' && this.readTimestamp(parsed.created)) {
+        continue
+      }
+      parsed[field] = now
+    }
+  }
+
+  /** Stamps lifecycle timestamps onto one note file, preserving every other key (see mutateRawNote). */
+  private async stampTimestamps(
+    filename: string,
+    fields: readonly NoteTimestampField[],
+    now: string
+  ): Promise<void> {
+    await this.mutateRawNote(filename, (parsed) => this.applyTimestampStamp(parsed, fields, now))
+  }
+
+  /**
+   * Stamps `opened` on every note that is in `pins` but was not in the previous
+   * pin set - i.e. the notes the user just opened onto the graph. Restoring a
+   * persisted pin set on startup is not a fresh open, so it stamps nothing.
+   */
+  private async stampNewlyPinned(pins: PinSpec[]): Promise<void> {
+    const alreadyPinned = new Set(this.lastPins.map((pin) => pin.filename))
+    const freshlyPinned = pins
+      .map((pin) => pin.filename)
+      .filter((filename) => !alreadyPinned.has(filename) && this.notes.has(filename))
+    if (freshlyPinned.length === 0) {
+      return
+    }
+
+    // Best-effort: a failed timestamp write must never stop the graph from opening.
+    try {
+      const now = new Date().toISOString()
+      for (const filename of freshlyPinned) {
+        await this.stampTimestamps(filename, ['opened'], now)
+      }
+      await this.applyLocalChange({ upsert: freshlyPinned })
+    } catch (error) {
+      console.warn('Failed to stamp `opened` on newly pinned notes:', error)
+    }
+  }
+
+  /** Every note wired directly to `filename` by an outgoing or an incoming relation. */
+  private relationNeighbors(filename: string): string[] {
+    const neighbors = new Set<string>()
+    for (const rel of this.notes.get(filename)?.rels ?? []) {
+      neighbors.add(rel.target)
+    }
+    for (const incoming of this.reverseRefs.get(filename) ?? []) {
+      neighbors.add(incoming.source)
+    }
+    neighbors.delete(filename)
+    return [...neighbors]
   }
 
   /** Reads, mutates, and rewrites a note's raw JSON in place, without disturbing fields this app doesn't otherwise read/write. */

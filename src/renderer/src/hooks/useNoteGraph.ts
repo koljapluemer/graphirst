@@ -33,6 +33,7 @@ export function useNoteGraph(): UseNoteGraphResult {
   const [refetchNonce, setRefetchNonce] = useState(0)
   const requestIdRef = useRef(0)
   const backgroundRef = useRef(false)
+  const hadPinsRef = useRef(false)
 
   useEffect(() => {
     let ignore = false
@@ -43,8 +44,17 @@ export function useNoteGraph(): UseNoteGraphResult {
     const run = async (): Promise<void> => {
       if (pins.size === 0) {
         setGraph(EMPTY_GRAPH)
+        // On the transition from some pins to none, still tell the backend the
+        // set is now empty (no graph fetch needed) so its record of "what was
+        // pinned last" stays accurate - that record is what `opened` timestamps
+        // are diffed against, so a later re-pin still counts as a fresh open.
+        if (hadPinsRef.current) {
+          hadPinsRef.current = false
+          void window.api.notes.openGraph([]).catch(() => {})
+        }
         return
       }
+      hadPinsRef.current = true
 
       if (!isBackground) {
         setLoading(true)

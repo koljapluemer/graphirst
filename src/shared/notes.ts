@@ -12,6 +12,14 @@ export interface RawNoteFile {
   extra?: string
   /** Freeform comments/to-dos attached to this note, rendered on the node itself. */
   notes?: string[]
+  /** ISO-8601 timestamp, written once when this app first creates the note. Implies `updated` and `opened` at that same instant. */
+  created?: string
+  /** ISO-8601 timestamp of the last content edit (body, extra content, or a freeform note entry). Any `updated` also refreshes `opened`. */
+  updated?: string
+  /** ISO-8601 timestamp this note was last opened on the graph - pinned onto it, created, or edited. */
+  opened?: string
+  /** ISO-8601 timestamp of the last change to this note's relationships, incoming or outgoing (a target added or removed, or a label changed). */
+  relationshipsChanged?: string
 }
 
 export interface NoteLink {
@@ -32,6 +40,11 @@ export interface IndexedNote {
   /** Whitespace-compacted extra content, the extra-content counterpart to bodyCompact (search now scans this too). */
   extraCompact: string
   notes: string[]
+  /** ISO-8601 lifecycle timestamps (see RawNoteFile). Null until this app has stamped the corresponding event. */
+  created: string | null
+  updated: string | null
+  opened: string | null
+  relationshipsChanged: string | null
 }
 
 export interface PinSpec {
@@ -48,6 +61,11 @@ export interface GraphNodePayload {
   depth: number
   degree: number
   notes: string[]
+  /** ISO-8601 lifecycle timestamps (see RawNoteFile). Null until this app has stamped the corresponding event. */
+  created: string | null
+  updated: string | null
+  opened: string | null
+  relationshipsChanged: string | null
 }
 
 export interface GraphEdgePayload {

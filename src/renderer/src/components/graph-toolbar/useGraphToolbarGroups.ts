@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Dices, FilePlus, Maximize, PinOff, ZoomIn, ZoomOut } from 'lucide-react'
+import { FilePlus, Layers, Maximize, PinOff, Search, Unplug, ZoomIn, ZoomOut } from 'lucide-react'
 import type { ToolbarAction } from './types'
 
 const ZOOM_DURATION_MS = 150
@@ -15,14 +15,22 @@ export function useGraphToolbarGroups({
   onAddNote,
   onUnpinAll,
   onPinOrphan,
+  onOpenRandomNote,
+  onOpenRandomSearchResult,
   unpinAllDisabled,
-  pinOrphanDisabled
+  pinOrphanDisabled,
+  openRandomNoteDisabled,
+  openRandomSearchResultDisabled
 }: {
   onAddNote: () => void
   onUnpinAll: () => void
   onPinOrphan: () => void
+  onOpenRandomNote: () => void
+  onOpenRandomSearchResult: () => void
   unpinAllDisabled: boolean
   pinOrphanDisabled: boolean
+  openRandomNoteDisabled: boolean
+  openRandomSearchResultDisabled: boolean
 }): ToolbarAction[][] {
   const { zoomIn, zoomOut, fitView } = useReactFlow()
 
@@ -38,9 +46,23 @@ export function useGraphToolbarGroups({
           disabled: unpinAllDisabled
         },
         {
+          id: 'open-random-note',
+          label: 'Open random',
+          icon: Layers,
+          onClick: onOpenRandomNote,
+          disabled: openRandomNoteDisabled
+        },
+        {
+          id: 'open-random-search-result',
+          label: 'Open random from search',
+          icon: Search,
+          onClick: onOpenRandomSearchResult,
+          disabled: openRandomSearchResultDisabled
+        },
+        {
           id: 'pin-orphan',
-          label: 'Pin orphan',
-          icon: Dices,
+          label: 'Open random orphan',
+          icon: Unplug,
           onClick: onPinOrphan,
           disabled: pinOrphanDisabled
         }
@@ -70,8 +92,12 @@ export function useGraphToolbarGroups({
       onAddNote,
       onUnpinAll,
       onPinOrphan,
+      onOpenRandomNote,
+      onOpenRandomSearchResult,
       unpinAllDisabled,
       pinOrphanDisabled,
+      openRandomNoteDisabled,
+      openRandomSearchResultDisabled,
       zoomIn,
       zoomOut,
       fitView

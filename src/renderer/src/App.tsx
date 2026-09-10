@@ -37,6 +37,7 @@ function App(): React.JSX.Element {
   const [statsOpen, setStatsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [orphanBusy, setOrphanBusy] = useState(false)
+  const [randomNoteBusy, setRandomNoteBusy] = useState(false)
   const { results, loading: searchLoading } = useNoteSearch(query, {
     enabled: bootstrap?.status === 'ready',
     onError: (error) => setErrorMessage(error.message),
@@ -152,6 +153,31 @@ function App(): React.JSX.Element {
     }
   }
 
+  const handleOpenRandomNote = async (): Promise<void> => {
+    setRandomNoteBusy(true)
+    try {
+      const response = await window.api.notes.randomNote({ exclude: Array.from(pins.keys()) })
+      if (response.filename) {
+        pinNote(response.filename, MANUAL_PIN_DEPTH)
+        setErrorMessage(null)
+      } else {
+        setErrorMessage('No unopened notes left to open.')
+      }
+    } catch (error) {
+      setErrorMessage((error as Error).message)
+    } finally {
+      setRandomNoteBusy(false)
+    }
+  }
+
+  const handleOpenRandomSearchResult = (): void => {
+    if (results.length === 0) {
+      return
+    }
+    const result = results[Math.floor(Math.random() * results.length)]
+    pinNote(result.filename, SEARCH_RESULT_PIN_DEPTH)
+  }
+
   if (bootLoading) {
     const progressLabel =
       indexProgress && indexProgress.total > 0
@@ -210,6 +236,10 @@ function App(): React.JSX.Element {
               onClearPins={clearPins}
               onPinRandomOrphan={() => void handlePinRandomOrphan()}
               pinRandomOrphanBusy={orphanBusy}
+              onOpenRandomNote={() => void handleOpenRandomNote()}
+              openRandomNoteBusy={randomNoteBusy}
+              onOpenRandomSearchResult={handleOpenRandomSearchResult}
+              openRandomSearchResultDisabled={results.length === 0}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />

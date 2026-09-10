@@ -28,6 +28,10 @@ interface GraphCanvasProps {
   onClearPins: () => void
   onPinRandomOrphan: () => void
   pinRandomOrphanBusy: boolean
+  onOpenRandomNote: () => void
+  openRandomNoteBusy: boolean
+  onOpenRandomSearchResult: () => void
+  openRandomSearchResultDisabled: boolean
 }
 
 interface FlowSceneProps {
@@ -39,6 +43,10 @@ interface FlowSceneProps {
   onClearPins: () => void
   onPinRandomOrphan: () => void
   pinRandomOrphanBusy: boolean
+  onOpenRandomNote: () => void
+  openRandomNoteBusy: boolean
+  onOpenRandomSearchResult: () => void
+  openRandomSearchResultDisabled: boolean
 }
 
 /**
@@ -55,7 +63,11 @@ function FlowScene({
   onSetPinDepth,
   onClearPins,
   onPinRandomOrphan,
-  pinRandomOrphanBusy
+  pinRandomOrphanBusy,
+  onOpenRandomNote,
+  openRandomNoteBusy,
+  onOpenRandomSearchResult,
+  openRandomSearchResultDisabled
 }: FlowSceneProps): React.JSX.Element {
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
 
@@ -123,8 +135,12 @@ function FlowScene({
     onAddNote: addNoteAtCenter,
     onUnpinAll: onClearPins,
     onPinOrphan: onPinRandomOrphan,
+    onOpenRandomNote,
+    onOpenRandomSearchResult,
     unpinAllDisabled: pins.size === 0,
-    pinOrphanDisabled: pinRandomOrphanBusy
+    pinOrphanDisabled: pinRandomOrphanBusy,
+    openRandomNoteDisabled: openRandomNoteBusy,
+    openRandomSearchResultDisabled
   })
 
   return (
@@ -210,7 +226,11 @@ export default function GraphCanvas({
   onSetPinDepth,
   onClearPins,
   onPinRandomOrphan,
-  pinRandomOrphanBusy
+  pinRandomOrphanBusy,
+  onOpenRandomNote,
+  openRandomNoteBusy,
+  onOpenRandomSearchResult,
+  openRandomSearchResultDisabled
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph) {
     return (
@@ -235,6 +255,10 @@ export default function GraphCanvas({
           onClearPins={onClearPins}
           onPinRandomOrphan={onPinRandomOrphan}
           pinRandomOrphanBusy={pinRandomOrphanBusy}
+          onOpenRandomNote={onOpenRandomNote}
+          openRandomNoteBusy={openRandomNoteBusy}
+          onOpenRandomSearchResult={onOpenRandomSearchResult}
+          openRandomSearchResultDisabled={openRandomSearchResultDisabled}
         />
       </ReactFlowProvider>
     </div>

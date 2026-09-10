@@ -29,6 +29,8 @@ import type {
   NotesGraphResponse,
   NotesSearchResponse,
   PinSpec,
+  RandomNoteRequest,
+  RandomNoteResponse,
   RandomOrphanRequest,
   RandomOrphanResponse,
   RawNoteFile,
@@ -666,24 +668,41 @@ export class NoteStore extends EventEmitter {
 
   async randomOrphan(request: RandomOrphanRequest): Promise<RandomOrphanResponse> {
     await this.ensureIndexed()
+    this.assertIndexReady()
 
+    return { filename: this.pickRandomFilename(request.exclude, (note) => note.degree === 0) }
+  }
+
+  async randomNote(request: RandomNoteRequest): Promise<RandomNoteResponse> {
+    await this.ensureIndexed()
+    this.assertIndexReady()
+
+    return { filename: this.pickRandomFilename(request.exclude) }
+  }
+
+  private assertIndexReady(): void {
     if (!this.stats) {
       throw new Error(this.message ?? 'The note index is not ready yet.')
     }
+  }
 
-    const excluded = new Set(request.exclude)
+  private pickRandomFilename(
+    exclude: string[],
+    predicate?: (note: IndexedNote) => boolean
+  ): string | null {
+    const excluded = new Set(exclude)
     const candidates: string[] = []
     for (const note of this.notes.values()) {
-      if (note.degree === 0 && !excluded.has(note.filename)) {
+      if (!excluded.has(note.filename) && (!predicate || predicate(note))) {
         candidates.push(note.filename)
       }
     }
 
     if (candidates.length === 0) {
-      return { filename: null }
+      return null
     }
 
-    return { filename: candidates[Math.floor(Math.random() * candidates.length)] }
+    return candidates[Math.floor(Math.random() * candidates.length)]
   }
 
   async deleteNoteEntry(request: DeleteNoteEntryRequest): Promise<void> {

@@ -18,6 +18,7 @@ const notesApi: NotesApi = {
   updateRelationLabel: (request) => ipcRenderer.invoke('notes:update-relation-label', request),
   deleteRelation: (request) => ipcRenderer.invoke('notes:delete-relation', request),
   randomOrphan: (request) => ipcRenderer.invoke('notes:random-orphan', request),
+  randomNote: (request) => ipcRenderer.invoke('notes:random-note', request),
   deleteNoteEntry: (request) => ipcRenderer.invoke('notes:delete-note-entry', request),
   undoDelete: () => ipcRenderer.invoke('notes:undo-delete'),
   onChanged: (callback) => {

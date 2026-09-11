@@ -4,7 +4,6 @@ import {
   ChartNoAxesCombined,
   FolderOpen,
   LoaderCircle,
-  RefreshCw,
   Search,
   Settings2
 } from 'lucide-react'
@@ -96,25 +95,6 @@ function App(): React.JSX.Element {
       refetch({ background: true })
     })
   }, [refetch])
-
-  const handleRefresh = async (): Promise<void> => {
-    setSettingsBusy(true)
-    try {
-      const state = await window.api.notes.refresh()
-      setBootstrap(state)
-      setErrorMessage(null)
-
-      if (state.status === 'ready') {
-        refetch()
-      } else {
-        clearPins()
-      }
-    } catch (error) {
-      setErrorMessage((error as Error).message)
-    } finally {
-      setSettingsBusy(false)
-    }
-  }
 
   const handlePickDirectory = async (): Promise<void> => {
     const previousGraphPath = bootstrap?.graphPath
@@ -268,18 +248,6 @@ function App(): React.JSX.Element {
                 onToggle={() => setSearchMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy'))}
               />
             </label>
-
-            <div className="mt-3 flex justify-end">
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs rounded-full border border-base-300 bg-base-100/75"
-                onClick={() => void handleRefresh()}
-                disabled={settingsBusy}
-                title="Re-index graph folder"
-              >
-                <RefreshCw className={['size-3.5', settingsBusy ? 'animate-spin' : ''].join(' ')} />
-              </button>
-            </div>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -342,15 +310,6 @@ function App(): React.JSX.Element {
             >
               <FolderOpen className="size-4" />
               Choose folder
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline rounded-full"
-              disabled={settingsBusy}
-              onClick={() => void handleRefresh()}
-            >
-              <RefreshCw className={['size-4', settingsBusy ? 'animate-spin' : ''].join(' ')} />
-              Re-index
             </button>
           </div>
 

@@ -256,7 +256,6 @@ export interface NotesApi {
   search: (query: string, mode?: SearchMode) => Promise<NotesSearchResponse>
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>
-  refresh: () => Promise<NotesBootstrap>
   /** Records today's first/last modal-open sample and returns the graph's timeline. */
   openStats: () => Promise<StatsResponse>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>

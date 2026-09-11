@@ -256,11 +256,6 @@ export class NoteStore extends EventEmitter {
     return this.getBootstrap()
   }
 
-  async refresh(): Promise<NotesBootstrap> {
-    await this.ensureIndexed(true)
-    return this.getBootstrap()
-  }
-
   async openStats(): Promise<StatsResponse> {
     await this.ensureIndexed()
     if (!this.stats) {
@@ -1422,8 +1417,8 @@ export class NoteStore extends EventEmitter {
 
   /**
    * Cheap add/remove drift check against the directory listing, to recover from
-   * any filesystem event the OS dropped. Content edits are not covered here - a
-   * manual re-index (`refresh`) is the fallback for those.
+   * any filesystem event the OS dropped. Content edits are not covered here -
+   * only a full app restart re-reads existing files from disk.
    */
   async reconcile(): Promise<void> {
     if (!this.hasIndexed || this.status !== 'ready' || !this.graphPath) {

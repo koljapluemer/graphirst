@@ -166,7 +166,7 @@ function FloatingEdge({
               <button
                 type="button"
                 onClick={openEditor}
-                className="rounded-full border border-base-300 bg-base-100/90 px-2 py-0.5 text-xs font-bold text-neutral shadow-sm hover:border-primary/50"
+                className="rounded-full border border-base-300 bg-base-100/90 px-2 py-0.5 text-xs font-bold text-base-content shadow-sm hover:border-primary/50"
               >
                 {relations.map((relation) => relation.label).join(' | ')}
               </button>

@@ -1,17 +1,7 @@
 import { useEffect, useState } from 'react'
-import {
-  AlertTriangle,
-  ChartNoAxesCombined,
-  FolderOpen,
-  LoaderCircle,
-  Moon,
-  Search,
-  Settings2,
-  Sun
-} from 'lucide-react'
+import { AlertTriangle, FolderOpen, LoaderCircle, Moon, Search, Settings2, Sun } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import SearchModeToggle from './components/SearchModeToggle'
-import StatsModal from './components/StatsModal'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
 import { useTheme } from './hooks/useTheme'
@@ -37,7 +27,6 @@ function App(): React.JSX.Element {
   const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [statsOpen, setStatsOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [orphanBusy, setOrphanBusy] = useState(false)
   const [randomNoteBusy, setRandomNoteBusy] = useState(false)
@@ -191,15 +180,6 @@ function App(): React.JSX.Element {
             >
               <Settings2 className="size-4" />
             </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm btn-square rounded-full border border-base-300 bg-base-100/90"
-              onClick={() => setStatsOpen(true)}
-              disabled={bootstrap?.status !== 'ready'}
-              title="Graph stats"
-            >
-              <ChartNoAxesCombined className="size-4" />
-            </button>
           </div>
 
           {displayedError ? (
@@ -339,8 +319,6 @@ function App(): React.JSX.Element {
           <button onClick={() => setSettingsOpen(false)}>close</button>
         </form>
       </dialog>
-
-      <StatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
     </main>
   )
 }

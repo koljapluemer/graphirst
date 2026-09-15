@@ -98,33 +98,6 @@ export interface SearchResult {
  */
 export type SearchMode = 'fuzzy' | 'raw'
 
-export interface IndexStats {
-  noteCount: number
-  relationCount: number
-  islandCount: number
-  orphanCount: number
-  lastIndexedAt: string
-}
-
-export interface StatsSample {
-  capturedAt: string
-  noteCount: number
-  relationCount: number
-  islandCount: number
-  orphanCount: number
-}
-
-export interface DailyStatsSnapshot {
-  date: string
-  first: StatsSample
-  last: StatsSample
-}
-
-export interface StatsResponse {
-  current: IndexStats
-  history: DailyStatsSnapshot[]
-}
-
 /** Progress ticks emitted while rebuildIndex works through the note directory, so the UI can show a determinate count instead of an indefinite spinner. */
 export interface IndexProgress {
   loaded: number
@@ -136,19 +109,16 @@ export interface NotesBootstrap {
   graphPath: string
   status: 'ready' | 'no-folder' | 'missing-directory' | 'empty' | 'error'
   message?: string
-  stats: IndexStats | null
   pins?: PinSpec[]
 }
 
 export interface NotesSearchResponse {
   graphPath: string
-  stats: IndexStats
   results: SearchResult[]
 }
 
 export interface NotesGraphResponse {
   graphPath: string
-  stats: IndexStats
   graph: NoteGraph
 }
 
@@ -256,8 +226,6 @@ export interface NotesApi {
   search: (query: string, mode?: SearchMode) => Promise<NotesSearchResponse>
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>
-  /** Records today's first/last modal-open sample and returns the graph's timeline. */
-  openStats: () => Promise<StatsResponse>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>
   deleteNote: (request: DeleteNoteRequest) => Promise<void>
   updateNote: (request: UpdateNoteRequest) => Promise<void>

@@ -165,10 +165,6 @@ app.whenReady().then(() => {
     return noteStore.openGraph(pins)
   })
 
-  ipcMain.handle('notes:open-stats', async () => {
-    return noteStore.openStats()
-  })
-
   ipcMain.handle('notes:create', async (_event, request: CreateNoteRequest) => {
     return noteStore.createNote(request)
   })

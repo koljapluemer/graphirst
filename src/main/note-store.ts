@@ -22,7 +22,6 @@ import type {
   GraphNodePayload,
   IndexedNote,
   IndexProgress,
-  IndexStats,
   NoteGraph,
   NoteLink,
   NoteRelationTuple,
@@ -37,9 +36,6 @@ import type {
   RawNoteFile,
   SearchMode,
   SearchResult,
-  StatsResponse,
-  StatsSample,
-  DailyStatsSnapshot,
   UndoDeleteResponse,
   UpdateNoteRequest,
   UpdateRelationRequest
@@ -77,7 +73,6 @@ const INCREMENTAL_BATCH_LIMIT = 50
 interface StoredSettings {
   graphPath?: string
   pins?: PinSpec[]
-  statsHistory?: Record<string, DailyStatsSnapshot[]>
 }
 
 interface SearchDocument extends Record<string, string> {
@@ -165,13 +160,11 @@ export class NoteStore extends EventEmitter {
   /** Empty until the user picks a folder (status 'no-folder'); there is no built-in default. */
   private graphPath = ''
   private lastPins: PinSpec[] = []
-  private statsHistory: Record<string, DailyStatsSnapshot[]> = {}
   private notes = new Map<string, IndexedNote>()
   /** noteStem -> newest matching filename in `images/`, rebuilt from a single directory scan each index. */
   private imagesByStem = new Map<string, string>()
   private reverseRefs = new Map<string, IncomingRelation[]>()
   private searchIndex = this.createSearchIndex()
-  private stats: IndexStats | null = null
   private status: NotesBootstrap['status'] = 'no-folder'
   private message?: string
   private hasIndexed = false
@@ -191,16 +184,6 @@ export class NoteStore extends EventEmitter {
       timeout: NodeJS.Timeout
     }
   >()
-
-  /** Running totals maintained incrementally; a full index recomputes them from scratch. */
-  private relationCount = 0
-  private orphanCount = 0
-  /**
-   * islandCount is the only stat too expensive to keep online (it needs a full
-   * connected-components sweep). Any structural change sets this flag; openStats
-   * recomputes lazily.
-   */
-  private islandCountDirty = false
 
   /** Serializes full reindexes and incremental applies so they never interleave. */
   private opChain: Promise<unknown> = Promise.resolve()
@@ -239,11 +222,11 @@ export class NoteStore extends EventEmitter {
 
   async getBootstrap(): Promise<NotesBootstrap> {
     await this.ensureIndexed()
+
     return {
       graphPath: this.graphPath,
       status: this.status,
       message: this.message,
-      stats: this.stats,
       pins: this.lastPins
     }
   }
@@ -257,55 +240,14 @@ export class NoteStore extends EventEmitter {
     return this.getBootstrap()
   }
 
-  async openStats(): Promise<StatsResponse> {
-    await this.ensureIndexed()
-    if (!this.stats) {
-      throw new Error(this.message ?? 'The note index is not ready yet.')
-    }
-
-    // islandCount is kept lazy: incremental applies only flag it dirty. This is
-    // the one reader, so recompute the full connected-components sweep here.
-    if (this.islandCountDirty) {
-      this.stats.islandCount = this.countIslands()
-      this.islandCountDirty = false
-    }
-
-    const now = new Date()
-    const sample: StatsSample = {
-      capturedAt: now.toISOString(),
-      noteCount: this.stats.noteCount,
-      relationCount: this.stats.relationCount,
-      islandCount: this.stats.islandCount,
-      orphanCount: this.stats.orphanCount
-    }
-    const date = toLocalCalendarDate(now)
-    const history = this.statsHistory[this.graphPath] ?? []
-    const today = history.find((entry) => entry.date === date)
-
-    if (today) {
-      today.last = sample
-    } else {
-      history.push({ date, first: sample, last: sample })
-      history.sort((left, right) => left.date.localeCompare(right.date))
-    }
-    this.statsHistory[this.graphPath] = history
-    await this.persistSettings()
-
-    return { current: this.stats, history }
-  }
-
   async search(query: string, mode: SearchMode = 'fuzzy'): Promise<NotesSearchResponse> {
     await this.ensureIndexed()
-
-    if (!this.stats) {
-      throw new Error(this.message ?? 'The note index is not ready yet.')
-    }
+    this.assertIndexReady()
 
     const trimmed = query.trim()
     if (!trimmed) {
       return {
         graphPath: this.graphPath,
-        stats: this.stats,
         results: []
       }
     }
@@ -314,7 +256,6 @@ export class NoteStore extends EventEmitter {
 
     return {
       graphPath: this.graphPath,
-      stats: this.stats,
       results: ranked
     }
   }
@@ -439,10 +380,7 @@ export class NoteStore extends EventEmitter {
 
   async openGraph(pins: PinSpec[]): Promise<NotesGraphResponse> {
     await this.ensureIndexed()
-
-    if (!this.stats) {
-      throw new Error(this.message ?? 'The note index is not ready yet.')
-    }
+    this.assertIndexReady()
 
     await this.stampNewlyPinned(pins)
     this.lastPins = pins
@@ -450,7 +388,6 @@ export class NoteStore extends EventEmitter {
 
     return {
       graphPath: this.graphPath,
-      stats: this.stats,
       graph: this.buildGraph(pins)
     }
   }
@@ -750,7 +687,7 @@ export class NoteStore extends EventEmitter {
   }
 
   private assertIndexReady(): void {
-    if (!this.stats) {
+    if (this.status !== 'ready' && this.status !== 'empty') {
       throw new Error(this.message ?? 'The note index is not ready yet.')
     }
   }
@@ -820,10 +757,6 @@ export class NoteStore extends EventEmitter {
             pin.depth >= 0
         )
       }
-
-      if (parsed.statsHistory && typeof parsed.statsHistory === 'object') {
-        this.statsHistory = parsed.statsHistory
-      }
     } catch (error) {
       const maybeError = error as NodeJS.ErrnoException
       if (maybeError.code !== 'ENOENT') {
@@ -869,7 +802,6 @@ export class NoteStore extends EventEmitter {
     if (!this.graphPath) {
       this.status = 'no-folder'
       this.message = undefined
-      this.stats = null
       this.hasIndexed = true
       return
     }
@@ -898,13 +830,6 @@ export class NoteStore extends EventEmitter {
     if (dirEntries.length === 0) {
       this.status = 'empty'
       this.message = `No JSON note files were found in ${this.graphPath}.`
-      this.stats = {
-        noteCount: 0,
-        relationCount: 0,
-        islandCount: 0,
-        orphanCount: 0,
-        lastIndexedAt: new Date().toISOString()
-      }
       this.hasIndexed = true
       return
     }
@@ -973,20 +898,6 @@ export class NoteStore extends EventEmitter {
       note.degree = note.rels.length + incomingCount
     }
 
-    this.relationCount = Array.from(this.notes.values()).reduce(
-      (sum, note) => sum + note.rels.length,
-      0
-    )
-    this.orphanCount = Array.from(this.notes.values()).filter((note) => note.degree === 0).length
-    this.islandCountDirty = false
-
-    this.stats = {
-      noteCount: this.notes.size,
-      relationCount: this.relationCount,
-      islandCount: this.countIslands(),
-      orphanCount: this.orphanCount,
-      lastIndexedAt: new Date().toISOString()
-    }
     this.status = 'ready'
     this.message = undefined
     this.hasIndexed = true
@@ -1014,7 +925,7 @@ export class NoteStore extends EventEmitter {
   /**
    * The single incremental-apply path, shared by in-app mutations, the watcher,
    * and the safety reconcile. Preserves the ordering `runFullIndex` relies on:
-   * images -> notes+corpus -> scoped repair -> reverseRefs -> degree -> stats.
+   * images -> notes+corpus -> scoped repair -> reverseRefs -> degree.
    * Emits `NOTES_CHANGED_EVENT` exactly once.
    */
   private async applyFileChanges(change: IndexChangeSet): Promise<void> {
@@ -1041,25 +952,13 @@ export class NoteStore extends EventEmitter {
     const affected = new Set<string>()
     const relSources = new Set<string>()
     const removedOrEmptied = new Set<string>()
-    // Notes that did not exist before this batch: their init degree was never
-    // reflected in orphanCount, so the degree repatch must treat them as new
-    // rather than as a 0 -> n transition.
+    // Notes that did not exist before this batch - their appearance can un-break
+    // a rel that was previously dropped as dangling.
     const newlyAdded = new Set<string>()
     // Notes that just regained a body - like newlyAdded, they can un-break a rel
     // that was previously dropped as dangling.
     const unEmptied = new Set<string>()
-    const prevDegrees = new Map<string, number>()
     const prevRelTargets = new Map<string, string[]>()
-
-    const captureDegree = (filename: string): void => {
-      if (prevDegrees.has(filename)) {
-        return
-      }
-      const note = this.notes.get(filename)
-      if (note) {
-        prevDegrees.set(filename, note.degree)
-      }
-    }
 
     // Reads one note and folds it in, recording the blast radius. Idempotent
     // within a batch (a filename already handled is skipped).
@@ -1067,7 +966,6 @@ export class NoteStore extends EventEmitter {
       if (relSources.has(filename)) {
         return
       }
-      captureDegree(filename)
       const { prev, next } = await this.indexNote(filename, delta)
       if (!prev && next) {
         newlyAdded.add(filename)
@@ -1083,11 +981,9 @@ export class NoteStore extends EventEmitter {
       )
       for (const rel of prev?.rels ?? []) {
         affected.add(rel.target)
-        captureDegree(rel.target)
       }
       for (const rel of next?.rels ?? []) {
         affected.add(rel.target)
-        captureDegree(rel.target)
       }
       if (!next || this.isEmptyBody(next)) {
         removedOrEmptied.add(filename)
@@ -1114,7 +1010,6 @@ export class NoteStore extends EventEmitter {
     }
 
     for (const filename of change.remove) {
-      captureDegree(filename)
       const prev = this.unindexNote(filename, delta)
       relSources.add(filename)
       affected.add(filename)
@@ -1125,12 +1020,10 @@ export class NoteStore extends EventEmitter {
       )
       for (const rel of prev?.rels ?? []) {
         affected.add(rel.target)
-        captureDegree(rel.target)
       }
       for (const incoming of this.reverseRefs.get(filename) ?? []) {
         affected.add(incoming.source)
         relSources.add(incoming.source)
-        captureDegree(incoming.source)
         if (!prevRelTargets.has(incoming.source)) {
           const source = this.notes.get(incoming.source)
           prevRelTargets.set(
@@ -1167,13 +1060,11 @@ export class NoteStore extends EventEmitter {
     for (const [source, targetsBeforeRepair] of repaired) {
       relSources.add(source)
       affected.add(source)
-      captureDegree(source)
       if (!prevRelTargets.has(source)) {
         prevRelTargets.set(source, targetsBeforeRepair)
       }
       for (const target of targetsBeforeRepair) {
         affected.add(target)
-        captureDegree(target)
       }
     }
 
@@ -1188,23 +1079,13 @@ export class NoteStore extends EventEmitter {
       }
     }
 
-    // 5. degree + orphan counter.
-    this.repatchDegrees(affected, prevDegrees, newlyAdded)
+    // 5. degree.
+    this.repatchDegrees(affected)
 
-    // 6. stats (islandCount stays lazy).
-    this.islandCountDirty = true
-    this.stats = {
-      noteCount: this.notes.size,
-      relationCount: this.relationCount,
-      islandCount: this.stats?.islandCount ?? 0,
-      orphanCount: this.orphanCount,
-      lastIndexedAt: new Date().toISOString()
-    }
-
-    // 7. hand the search worker just the delta.
+    // 6. hand the search worker just the delta.
     this.postWorkerDelta(delta.upserts, delta.removals)
 
-    // 8. one signal per batch.
+    // 7. one signal per batch.
     this.emit(NOTES_CHANGED_EVENT)
   }
 
@@ -1243,7 +1124,6 @@ export class NoteStore extends EventEmitter {
     this.upsertRawCorpus(entry)
     delta.upserts.push(entry)
 
-    this.relationCount += next.rels.length - (prev?.rels.length ?? 0)
     return { prev, next }
   }
 
@@ -1257,7 +1137,6 @@ export class NoteStore extends EventEmitter {
     this.searchIndex.remove(filename)
     this.removeFromRawCorpus(filename)
     delta.removals.push(filename)
-    this.relationCount -= prev.rels.length
     return prev
   }
 
@@ -1283,39 +1162,16 @@ export class NoteStore extends EventEmitter {
     }
   }
 
-  /**
-   * Recomputes `degree` for every note whose relation count or incoming-ref count
-   * moved, and keeps `orphanCount` in step as notes cross the 0 / non-0 boundary.
-   */
-  private repatchDegrees(
-    affected: Set<string>,
-    prevDegrees: Map<string, number>,
-    newlyAdded: Set<string>
-  ): void {
+  /** Recomputes `degree` for every note whose relation count or incoming-ref count moved. */
+  private repatchDegrees(affected: Set<string>): void {
     for (const filename of affected) {
       const note = this.notes.get(filename)
-      const prevDegree = prevDegrees.get(filename)
-
       if (!note) {
-        if (prevDegree === 0 && !newlyAdded.has(filename)) {
-          this.orphanCount -= 1
-        }
         continue
       }
 
       const incoming = this.reverseRefs.get(filename)?.length ?? 0
-      const nextDegree = note.rels.length + incoming
-      note.degree = nextDegree
-
-      const isOrphan = nextDegree === 0
-      // A note new to this batch was never in orphanCount, so it only ever adds.
-      if (prevDegree === undefined || newlyAdded.has(filename)) {
-        if (isOrphan) {
-          this.orphanCount += 1
-        }
-      } else if ((prevDegree === 0) !== isOrphan) {
-        this.orphanCount += isOrphan ? 1 : -1
-      }
+      note.degree = note.rels.length + incoming
     }
   }
 
@@ -1543,8 +1399,8 @@ export class NoteStore extends EventEmitter {
    * Strips broken rels from each note in `candidates`: a missing target is dropped
    * in memory only (and remembered in `danglingRefSources` so it can be restored
    * if the target reappears); an existing but empty-bodied target is dropped from
-   * memory and from disk. Keeps `relationCount` in step. Returns each mutated
-   * note mapped to its rel targets *before* the repair.
+   * memory and from disk. Returns each mutated note mapped to its rel targets
+   * *before* the repair.
    */
   private async repairRelsOf(candidates: Iterable<string>): Promise<Map<string, string[]>> {
     const mutated = new Map<string, string[]>()
@@ -1578,7 +1434,6 @@ export class NoteStore extends EventEmitter {
         filename,
         note.rels.map((rel) => rel.target)
       )
-      this.relationCount -= note.rels.length - kept.length
       note.rels = kept
       if (relationToEmptyTarget) {
         writes.push(this.persistRelations(filename, kept))
@@ -1628,45 +1483,13 @@ export class NoteStore extends EventEmitter {
   }
 
   /** Counts weakly connected components; a degree-zero orphan is a one-node island. */
-  private countIslands(): number {
-    const unvisited = new Set(this.notes.keys())
-    let count = 0
-
-    while (unvisited.size > 0) {
-      count += 1
-      const start = unvisited.values().next().value as string
-      const pending = [start]
-      unvisited.delete(start)
-
-      while (pending.length > 0) {
-        const filename = pending.pop() as string
-        const note = this.notes.get(filename)
-        const neighbors = [
-          ...(note?.rels.map((relation) => relation.target) ?? []),
-          ...(this.reverseRefs.get(filename)?.map((relation) => relation.source) ?? [])
-        ]
-        for (const neighbor of neighbors) {
-          if (unvisited.delete(neighbor)) {
-            pending.push(neighbor)
-          }
-        }
-      }
-    }
-
-    return count
-  }
-
   private resetIndex(): void {
     this.notes.clear()
     this.imagesByStem.clear()
     this.reverseRefs.clear()
     this.searchIndex = this.createSearchIndex()
-    this.stats = null
     this.status = 'empty'
     this.message = undefined
-    this.relationCount = 0
-    this.orphanCount = 0
-    this.islandCountDirty = false
     this.danglingRefSources.clear()
     // Covers rebuildIndex's early-return paths (missing directory, read error,
     // empty folder) - the success path overwrites this with the real corpus
@@ -2256,8 +2079,7 @@ export class NoteStore extends EventEmitter {
       JSON.stringify(
         {
           graphPath: this.graphPath,
-          pins: this.lastPins,
-          statsHistory: this.statsHistory
+          pins: this.lastPins
         } satisfies StoredSettings,
         null,
         2
@@ -2265,11 +2087,4 @@ export class NoteStore extends EventEmitter {
       'utf8'
     )
   }
-}
-
-function toLocalCalendarDate(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }

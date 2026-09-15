@@ -48,7 +48,7 @@ export default function PaneSearchMenu({
   return (
     <div
       ref={rootRef}
-      className="nodrag nopan nowheel fixed z-50 w-72 rounded-box border border-base-300 bg-base-100 p-3 shadow-xl"
+      className="nodrag nopan nowheel fixed z-50 w-72  border border-base-300 bg-base-100 p-3 shadow-xl"
       style={{ left: screenPosition.x, top: screenPosition.y }}
       onContextMenu={(event) => event.preventDefault()}
     >

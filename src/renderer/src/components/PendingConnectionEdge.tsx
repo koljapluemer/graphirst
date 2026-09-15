@@ -71,7 +71,7 @@ export default function PendingConnectionEdge({
           }}
         >
           <form
-            className="flex flex-col gap-1.5 rounded-box border border-base-300 bg-base-100 p-2 shadow-lg"
+            className="flex flex-col gap-1.5  border border-base-300 bg-base-100 p-2 shadow-lg"
             onSubmit={(event) => {
               event.preventDefault()
               void handleConfirm()

@@ -104,7 +104,7 @@ export default function DraftNoteCard({
     image?.status === 'existing' ? mediaUrl(image.filename) : (image?.dataUrl ?? null)
 
   return (
-    <article className="note-card group-focus:ring-2 group-focus:ring-primary/40 rounded-box border border-dashed border-primary/50 bg-base-100 px-5 py-4 text-left shadow-xl">
+    <article className="note-card group-focus:ring-2 group-focus:ring-primary/40  border border-dashed border-primary/50 bg-base-100 px-5 py-4 text-left shadow-xl">
       <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide text-base-content/60">
           {mode === 'edit' ? 'Edit note' : 'New note'}
@@ -121,7 +121,7 @@ export default function DraftNoteCard({
 
       {imagePreviewSrc ? (
         <div className="nodrag relative mb-3">
-          <img src={imagePreviewSrc} alt="" className="h-auto w-full rounded-box" />
+          <img src={imagePreviewSrc} alt="" className="h-auto w-full " />
           <button
             type="button"
             className="btn btn-ghost btn-xs absolute right-1.5 top-1.5 rounded-full bg-base-100/90 hover:bg-error/10 hover:text-error"

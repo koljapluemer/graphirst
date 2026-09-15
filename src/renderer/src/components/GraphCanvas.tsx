@@ -241,14 +241,14 @@ export default function GraphCanvas({
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph) {
     return (
-      <div className="flex h-full items-center justify-center rounded-box border border-dashed border-base-300 bg-base-100/70 text-sm text-base-content/70">
+      <div className="flex h-full items-center justify-center  border border-dashed border-base-300 bg-base-100/70 text-sm text-base-content/70">
         Search for a note to pin it.
       </div>
     )
   }
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden rounded-box border border-base-300 bg-base-100 shadow-xl">
+    <div className="relative h-full min-h-0 overflow-hidden  border border-base-300 bg-base-100 shadow-xl">
       {loading ? (
         <div className="pointer-events-none absolute inset-0 z-20 bg-base-100/60 backdrop-blur-sm" />
       ) : null}

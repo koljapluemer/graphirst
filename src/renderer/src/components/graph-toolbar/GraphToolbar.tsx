@@ -16,7 +16,7 @@ export default function GraphToolbar({ groups }: { groups: ToolbarAction[][] }):
       role="toolbar"
       aria-orientation="vertical"
       aria-label="Graph tools"
-      className="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-lg backdrop-blur"
+      className="flex flex-col gap-1  border border-base-300 bg-base-100/90 p-1 shadow-lg backdrop-blur"
     >
       <ToolbarButton
         icon={expanded ? PanelLeftClose : PanelLeftOpen}

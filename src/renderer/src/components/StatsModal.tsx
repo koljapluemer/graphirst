@@ -89,7 +89,7 @@ export default function StatsModal({ open, onClose }: StatsModalProps): React.JS
               {SERIES.map((series) => (
                 <div
                   key={series.key}
-                  className="rounded-box border border-base-300 bg-base-200/60 p-4"
+                  className=" border border-base-300 bg-base-200/60 p-4"
                 >
                   <div className="text-sm text-base-content/60">{series.label}</div>
                   <div className="mt-1 text-2xl font-semibold">
@@ -99,7 +99,7 @@ export default function StatsModal({ open, onClose }: StatsModalProps): React.JS
               ))}
             </div>
 
-            <div className="mt-6 h-80 rounded-box border border-base-300 p-4">
+            <div className="mt-6 h-80  border border-base-300 p-4">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                   <CartesianGrid

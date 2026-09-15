@@ -179,8 +179,8 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <main className="h-screen p-4">
-      <div className="grid h-[calc(100vh-2rem)] grid-cols-[minmax(0,1fr)_22rem] gap-4">
+    <main className="h-screen">
+      <div className="grid h-[calc(100vh-2rem)] grid-cols-[minmax(0,1fr)_22rem]">
         <section className="relative min-h-0">
           <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
             <button
@@ -231,7 +231,7 @@ function App(): React.JSX.Element {
           )}
         </section>
 
-        <aside className="flex min-h-0 flex-col rounded-box border border-base-300 bg-base-100/90 shadow-xl backdrop-blur">
+        <aside className="flex min-h-0 flex-col border border-base-300 bg-base-100/90 shadow-xl backdrop-blur">
           <div className="border-b border-base-300 px-4 py-4">
             <label className="input w-full">
               <Search className="size-4.5 text-base-content/60" />
@@ -272,7 +272,7 @@ function App(): React.JSX.Element {
                     key={result.filename}
                     type="button"
                     className={[
-                      'block w-full rounded-box border px-4 py-3 text-left transition-colors',
+                      'block w-full  border px-4 py-3 text-left transition-colors',
                       isActive
                         ? 'border-primary/50 bg-primary/10'
                         : 'border-transparent bg-base-200/70 hover:border-base-300 hover:bg-base-100'
@@ -364,7 +364,7 @@ function UnavailableState({
   const message = bootstrap?.message ?? 'Choose the folder that contains your JSON notes.'
 
   return (
-    <div className="flex h-full items-center justify-center rounded-box border border-dashed border-base-300 bg-base-100/70 px-8 text-center">
+    <div className="flex h-full items-center justify-center border border-dashed border-base-300 bg-base-100/70 px-8 text-center">
       <div className="max-w-lg space-y-4">
         <div className="space-y-2">
           <h2 className="text-xl font-semibold">{title}</h2>

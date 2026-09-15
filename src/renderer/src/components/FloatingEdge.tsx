@@ -112,7 +112,7 @@ function FloatingEdge({
             }}
           >
             {editing ? (
-              <div className="w-56 rounded-box border border-base-300 bg-base-100 p-2.5 shadow-lg">
+              <div className="w-56  border border-base-300 bg-base-100 p-2.5 shadow-lg">
                 {relations.map((relation, index) => (
                   <div key={relation.id} className="mb-1.5 flex items-center gap-1.5 last:mb-0">
                     <input

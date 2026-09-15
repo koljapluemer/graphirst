@@ -54,7 +54,7 @@ export default function NoteCard({
     <article
       className={[
         'note-card group-focus:ring-2 group-focus:ring-primary/40',
-        'rounded-box border bg-base-100 px-5 py-4 text-left shadow-xl',
+        ' border bg-base-100 px-5 py-4 text-left shadow-xl',
         pinDepth !== null ? 'border-primary' : 'border-base-300',
         isAnchor ? 'border-dashed' : '',
         selected ? 'ring-2 ring-primary/40' : ''
@@ -121,7 +121,7 @@ export default function NoteCard({
       {error ? <p className="mb-2 text-xs text-error">{error}</p> : null}
 
       {note.image ? (
-        <img src={mediaUrl(note.image)} alt="" className="mb-3 h-auto w-full rounded-box" />
+        <img src={mediaUrl(note.image)} alt="" className="mb-3 h-auto w-full " />
       ) : null}
 
       <div
@@ -131,7 +131,7 @@ export default function NoteCard({
           // Blockquotes: keep the accent bar + a subtle fill, drop the plugin's
           // bold + italic styling and the auto-inserted curly quote marks.
           'prose-blockquote:font-normal prose-blockquote:not-italic',
-          'prose-blockquote:rounded-box prose-blockquote:bg-base-200/60 prose-blockquote:py-2 prose-blockquote:pr-4',
+          'prose-blockquote: prose-blockquote:bg-base-200/60 prose-blockquote:py-2 prose-blockquote:pr-4',
           '[&_blockquote_p:first-of-type::before]:content-none',
           '[&_blockquote_p:last-of-type::after]:content-none'
         ].join(' ')}
@@ -165,7 +165,7 @@ export default function NoteCard({
           {note.notes.map((entry, index) => (
             <div
               key={index}
-              className="flex items-start justify-between gap-2 rounded-box border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent"
+              className="flex items-start justify-between gap-2  border border-accent/40 bg-accent/10 px-3 py-2 text-sm text-accent"
             >
               <p className="whitespace-pre-wrap">{entry}</p>
               <button

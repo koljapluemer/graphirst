@@ -14,6 +14,31 @@ export const NODE_MIN_HEIGHT = 220
 const NODE_GAP = 64
 const LAYER_GAP = 200
 
+// Fixed footprint reserved for every edge's label, so ELK's layered algorithm
+// widens the gap between layers rather than letting a label print on top of the
+// next note card. Deduced from the collapsed label pill's classes in
+// FloatingEdge.tsx (`text-xs font-bold px-2 py-0.5 border`), not measured from
+// the real DOM - see estimateEdgeLabelSize below for why a fixed guess is used
+// here instead of the node-height approach's measure-and-relayout pass.
+const EDGE_LABEL_FONT_SIZE = 12 // text-xs
+const EDGE_LABEL_LINE_HEIGHT = 16 // text-xs line-height
+const EDGE_LABEL_AVG_CHAR_WIDTH = EDGE_LABEL_FONT_SIZE * 0.6 // rough glyph width, bold sans-serif
+const EDGE_LABEL_ESTIMATED_CHARS = 20 // typical relation label length; longer ones just overflow the reserved box
+const EDGE_LABEL_HORIZONTAL_PADDING = 16 // px-2 on both sides
+const EDGE_LABEL_VERTICAL_PADDING = 4 // py-0.5 on both sides
+const EDGE_LABEL_BORDER = 2 // 1px border on both sides
+
+function estimateEdgeLabelSize(): { width: number; height: number } {
+  return {
+    width: Math.round(
+      EDGE_LABEL_ESTIMATED_CHARS * EDGE_LABEL_AVG_CHAR_WIDTH +
+        EDGE_LABEL_HORIZONTAL_PADDING +
+        EDGE_LABEL_BORDER
+    ),
+    height: EDGE_LABEL_LINE_HEIGHT + EDGE_LABEL_VERTICAL_PADDING + EDGE_LABEL_BORDER
+  }
+}
+
 const ELK_LAYOUT_OPTIONS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
@@ -27,7 +52,11 @@ const ELK_LAYOUT_OPTIONS = {
   'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
   'elk.spacing.nodeNode': `${NODE_GAP}`,
-  'elk.layered.spacing.nodeNodeBetweenLayers': `${LAYER_GAP}`
+  'elk.layered.spacing.nodeNodeBetweenLayers': `${LAYER_GAP}`,
+  // ELK's own default, set explicitly since it's what makes the `labels` entry
+  // below (see getLayoutedGraph) turn into a space-reserving dummy node between
+  // layers instead of being ignored.
+  'elk.edgeLabels.placement': 'CENTER'
 } as const
 
 const elk = new ELK()
@@ -275,12 +304,20 @@ export async function getLayoutedGraph(
     }),
     // ELK throws if an edge references a node id not present in `children` above -
     // defend against that even though the backend is expected not to send one.
+    //
+    // Every edge gets the same fixed label footprint (see estimateEdgeLabelSize) so
+    // ELK reserves room for it between layers - this runs against the backend's raw,
+    // pre-merge relation list, so a reciprocal pair (merged into one labeled edge by
+    // mergeRelationsIntoEdges at render time) reserves space twice. That's a harmless
+    // over-estimate, not a bug: it only makes the gap roomier than the single merged
+    // label actually needs.
     edges: graph.edges
       .filter((edge) => knownFilenames.has(edge.source) && knownFilenames.has(edge.target))
       .map((edge): ElkExtendedEdge => ({
         id: edge.id,
         sources: [edge.source],
-        targets: [edge.target]
+        targets: [edge.target],
+        labels: [{ text: edge.label, ...estimateEdgeLabelSize() }]
       }))
   }
 

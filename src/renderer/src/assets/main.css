@@ -1,40 +1,6 @@
 @import 'tailwindcss';
 @plugin "daisyui" {
-  themes: false;
-}
-
-@plugin "daisyui/theme" {
-  name: 'graphirst';
-  default: true;
-  color-scheme: light;
-  --color-base-100: #fffcf7;
-  --color-base-200: #f6f0e7;
-  --color-base-300: #e2d3c4;
-  --color-base-content: #2c1f17;
-  --color-primary: #d86f49;
-  --color-primary-content: #fff8f2;
-  --color-secondary: #0f6f6d;
-  --color-secondary-content: #eafffb;
-  --color-accent: #b3672c;
-  --color-accent-content: #fff4ea;
-  --color-neutral: #6b5143;
-  --color-neutral-content: #f6f0e7;
-  --color-info: #2f7f77;
-  --color-info-content: #eafffb;
-  --color-success: #4c8c5c;
-  --color-success-content: #eafbee;
-  --color-warning: #b3672c;
-  --color-warning-content: #fff4ea;
-  --color-error: #b3462c;
-  --color-error-content: #fff0ea;
-  --radius-selector: 999px;
-  --radius-field: 0.875rem;
-  --radius-box: 1.5rem;
-  --size-selector: 0.25rem;
-  --size-field: 0.25rem;
-  --border: 1px;
-  --depth: 0;
-  --noise: 0;
+  themes: light --default, dark --prefersdark;
 }
 
 @plugin "@tailwindcss/typography";

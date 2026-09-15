@@ -4,7 +4,6 @@ import type { NoteFlowNode } from './NoteNode'
 import { mergeRelationsIntoEdges } from './graph-edges'
 import type { ConnectingInteraction, DraftInteraction, Interaction } from './graph-interaction'
 import { NODE_WIDTH, type LayoutedGraph } from '../lib/graph-layout'
-import { GRAPH_COLORS } from '../lib/graph-colors'
 import type { GraphEdgePayload, NoteGraph } from '../../../shared/notes'
 
 // Resets React Flow's own default node-wrapper styling (border/shadow/padding) and
@@ -180,7 +179,7 @@ export function buildView(
         source: interaction.sourceFilename,
         target: interaction.clientId,
         type: 'floating',
-        style: { stroke: GRAPH_COLORS.base300, strokeWidth: 1.4, strokeDasharray: '4 4' }
+        style: { strokeWidth: 1.4, strokeDasharray: '4 4' }
       })
     }
   }

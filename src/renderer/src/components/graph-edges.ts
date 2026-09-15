@@ -1,5 +1,4 @@
 import { MarkerType, type Edge, type XYPosition } from '@xyflow/react'
-import { GRAPH_COLORS } from '../lib/graph-colors'
 import type { GraphEdgePayload } from '../../../shared/notes'
 
 /**
@@ -53,8 +52,6 @@ function edgeVisualWeight(edge: GraphEdgePayload): { strokeWidth: number; opacit
 }
 
 function buildDirectedEdge(edge: GraphEdgePayload): Edge {
-  const color = edge.direction === 'outgoing' ? GRAPH_COLORS.secondary : GRAPH_COLORS.accent
-
   return {
     id: edge.id,
     source: edge.source,
@@ -63,13 +60,9 @@ function buildDirectedEdge(edge: GraphEdgePayload): Edge {
     markerEnd: {
       type: MarkerType.ArrowClosed,
       width: 16,
-      height: 16,
-      color
+      height: 16
     },
-    style: {
-      stroke: color,
-      ...edgeVisualWeight(edge)
-    },
+    style: edgeVisualWeight(edge),
     data: { relations: [edge] }
   }
 }
@@ -83,7 +76,6 @@ function buildReciprocalEdge(
   const posB = positions.get(b.source) ?? { x: 0, y: 0 }
   const aGoesFirst = posA.x - posB.x || posA.y - posB.y
   const [first, second] = aGoesFirst <= 0 ? [a, b] : [b, a]
-  const color = GRAPH_COLORS.neutral
 
   return {
     id: `${first.id}__reciprocal__${second.id}`,
@@ -93,19 +85,14 @@ function buildReciprocalEdge(
     markerStart: {
       type: MarkerType.ArrowClosed,
       width: 16,
-      height: 16,
-      color
+      height: 16
     },
     markerEnd: {
       type: MarkerType.ArrowClosed,
       width: 16,
-      height: 16,
-      color
+      height: 16
     },
-    style: {
-      stroke: color,
-      ...edgeVisualWeight(first.depth <= second.depth ? first : second)
-    },
+    style: edgeVisualWeight(first.depth <= second.depth ? first : second),
     data: { relations: [first, second] }
   }
 }

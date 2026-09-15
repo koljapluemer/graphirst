@@ -8,7 +8,6 @@ import {
 import { X } from 'lucide-react'
 import { useState } from 'react'
 import { EDGE_OVERLAY_Z_INDEX, getEdgeParams } from './graph-edge-geometry'
-import { GRAPH_COLORS } from '../lib/graph-colors'
 
 export interface PendingConnectionEdgeData extends Record<string, unknown> {
   onConfirm: (label: string) => Promise<void>
@@ -60,10 +59,7 @@ export default function PendingConnectionEdge({
 
   return (
     <>
-      <BaseEdge
-        path={path}
-        style={{ stroke: GRAPH_COLORS.primary, strokeWidth: 1.6, strokeDasharray: '4 4' }}
-      />
+      <BaseEdge path={path} style={{ strokeWidth: 1.6, strokeDasharray: '4 4' }} />
       <EdgeLabelRenderer>
         <div
           className="nodrag nopan"

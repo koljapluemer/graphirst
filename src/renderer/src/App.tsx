@@ -4,17 +4,21 @@ import {
   ChartNoAxesCombined,
   FolderOpen,
   LoaderCircle,
+  Moon,
   Search,
-  Settings2
+  Settings2,
+  Sun
 } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import SearchModeToggle from './components/SearchModeToggle'
 import StatsModal from './components/StatsModal'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
+import { useTheme } from './hooks/useTheme'
 import type { IndexProgress, NotesBootstrap, SearchMode } from '../../shared/notes'
 
 function App(): React.JSX.Element {
+  const [theme, setTheme] = useTheme()
   const [bootstrap, setBootstrap] = useState<NotesBootstrap | null>(null)
   const {
     graph,
@@ -209,6 +213,7 @@ function App(): React.JSX.Element {
             <GraphCanvas
               graph={graph}
               loading={graphLoading}
+              colorMode={theme}
               pins={pins}
               onPinNote={pinNote}
               onUnpinNote={unpinNote}
@@ -316,6 +321,19 @@ function App(): React.JSX.Element {
           {bootstrap?.message ? (
             <div className="alert alert-warning alert-soft mt-5">{bootstrap.message}</div>
           ) : null}
+
+          <div className="mt-5 flex items-center justify-between border-t border-base-300 pt-5">
+            <span className="text-sm font-medium">Theme</span>
+            <label className="swap swap-rotate">
+              <input
+                type="checkbox"
+                checked={theme === 'dark'}
+                onChange={(event) => setTheme(event.target.checked ? 'dark' : 'light')}
+              />
+              <Sun className="swap-off size-4.5" />
+              <Moon className="swap-on size-4.5" />
+            </label>
+          </div>
         </div>
         <form method="dialog" className="modal-backdrop">
           <button onClick={() => setSettingsOpen(false)}>close</button>

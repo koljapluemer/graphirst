@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
@@ -461,7 +462,7 @@ export class NoteStore extends EventEmitter {
       throw new Error(`Could not find "${request.relatedFilename}" in ${this.graphPath}.`)
     }
 
-    const filename = this.generateFilename()
+    const filename = this.generateFilename(request.body)
     const now = new Date().toISOString()
 
     if (!request.relatedFilename) {
@@ -2042,10 +2043,22 @@ export class NoteStore extends EventEmitter {
     return value.match(/[\p{L}\p{N}_-]+/gu) ?? []
   }
 
-  private generateFilename(): string {
+  private slugifyBody(body: string): string {
+    const firstWords = body.trim().split(/\s+/).filter(Boolean).slice(0, 6).join(' ')
+    const slug = firstWords
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40)
+      .replace(/-+$/, '')
+    return slug || 'note'
+  }
+
+  private generateFilename(body: string): string {
+    const slug = this.slugifyBody(body)
     let candidate: string
     do {
-      candidate = `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.json`
+      candidate = `${slug}-${randomBytes(3).toString('hex')}.json`
     } while (this.notes.has(candidate))
     return candidate
   }

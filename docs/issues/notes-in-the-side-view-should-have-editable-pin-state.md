@@ -1,0 +1,1 @@
+notes in the side view should have editable pin state instead of awkwardly becoming yellow

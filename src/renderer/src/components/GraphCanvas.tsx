@@ -1,4 +1,11 @@
-import { Background, Panel, ReactFlow, ReactFlowProvider, type XYPosition } from '@xyflow/react'
+import {
+  Background,
+  Panel,
+  ReactFlow,
+  ReactFlowProvider,
+  type ColorMode,
+  type XYPosition
+} from '@xyflow/react'
 import { useCallback, useRef, useState } from 'react'
 import FloatingEdge from './FloatingEdge'
 import NoteNode from './NoteNode'
@@ -10,7 +17,6 @@ import { useGraphToolbarGroups } from './graph-toolbar/useGraphToolbarGroups'
 import { useElkLayout } from '../hooks/useElkLayout'
 import { useGraphInteraction } from '../hooks/useGraphInteraction'
 import { useGraphNodes } from '../hooks/useGraphNodes'
-import { GRAPH_COLORS } from '../lib/graph-colors'
 import type { NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
@@ -21,6 +27,7 @@ const CONNECTION_RADIUS = 200
 interface GraphCanvasProps {
   graph: NoteGraph | null
   loading: boolean
+  colorMode: ColorMode
   pins: ReadonlyMap<string, number>
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
@@ -36,6 +43,7 @@ interface GraphCanvasProps {
 
 interface FlowSceneProps {
   graph: NoteGraph
+  colorMode: ColorMode
   pins: ReadonlyMap<string, number>
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
@@ -57,6 +65,7 @@ interface FlowSceneProps {
  */
 function FlowScene({
   graph,
+  colorMode,
   pins,
   onPinNote,
   onUnpinNote,
@@ -146,6 +155,7 @@ function FlowScene({
   return (
     <ReactFlow
       fitView
+      colorMode={colorMode}
       className="[&_.react-flow__renderer]:cursor-grab [&_.react-flow__renderer:active]:cursor-grabbing [&_.react-flow__viewport]:cursor-grab [&_.react-flow__viewport:active]:cursor-grabbing"
       nodeOrigin={[0.5, 0.5]}
       nodes={nodes}
@@ -164,11 +174,7 @@ function FlowScene({
       onDoubleClick={onPaneDoubleClick}
       onPaneContextMenu={onPaneContextMenu}
       zoomOnDoubleClick={false}
-      connectionLineStyle={{
-        stroke: GRAPH_COLORS.primary,
-        strokeWidth: 1.6,
-        strokeDasharray: '4 4'
-      }}
+      connectionLineStyle={{ strokeWidth: 1.6, strokeDasharray: '4 4' }}
       minZoom={0.02}
       maxZoom={1.5}
       panOnScroll
@@ -180,7 +186,7 @@ function FlowScene({
         zIndex: 0
       }}
     >
-      <Background gap={28} color={GRAPH_COLORS.base300} />
+      <Background gap={28} />
       <Panel position="top-left">
         <GraphToolbar groups={toolbarGroups} />
       </Panel>
@@ -220,6 +226,7 @@ function FlowScene({
 export default function GraphCanvas({
   graph,
   loading,
+  colorMode,
   pins,
   onPinNote,
   onUnpinNote,
@@ -248,6 +255,7 @@ export default function GraphCanvas({
       <ReactFlowProvider>
         <FlowScene
           graph={graph}
+          colorMode={colorMode}
           pins={pins}
           onPinNote={onPinNote}
           onUnpinNote={onUnpinNote}

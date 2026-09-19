@@ -7,6 +7,7 @@ import { Worker } from 'node:worker_threads'
 import { Document } from 'flexsearch'
 import { GraphWatcher, type GraphChangeBatch } from './graph-watcher'
 import { IMAGES_DIR_NAME, IMAGE_STEM_PATTERN, SUPPORTED_IMAGE_EXTENSIONS } from './graph-fs'
+import { selectRecentNotes } from './recent-notes'
 import type {
   AttachImageRequest,
   AttachImageResponse,
@@ -34,6 +35,8 @@ import type {
   RandomOrphanRequest,
   RandomOrphanResponse,
   RawNoteFile,
+  RecentNotesRequest,
+  RecentNotesResponse,
   SearchMode,
   SearchResult,
   UndoDeleteResponse,
@@ -677,6 +680,13 @@ export class NoteStore extends EventEmitter {
     this.assertIndexReady()
 
     return { filename: this.pickRandomFilename(request.exclude, (note) => note.degree === 0) }
+  }
+
+  async recentNotes(request: RecentNotesRequest): Promise<RecentNotesResponse> {
+    await this.ensureIndexed()
+    this.assertIndexReady()
+
+    return { results: selectRecentNotes(this.notes.values(), request.sort) }
   }
 
   async randomNote(request: RandomNoteRequest): Promise<RandomNoteResponse> {

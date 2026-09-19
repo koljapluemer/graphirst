@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, FolderOpen, LoaderCircle, Moon, Search, Settings2, Sun } from 'lucide-react'
+import { AlertTriangle, FolderOpen, LoaderCircle, Moon, Settings2, Sun } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
-import SearchModeToggle from './components/SearchModeToggle'
+import Sidebar from './components/sidebar/Sidebar'
 import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
 import { useTheme } from './hooks/useTheme'
@@ -211,61 +211,19 @@ function App(): React.JSX.Element {
           )}
         </section>
 
-        <aside className="flex min-h-0 flex-col border border-base-300 bg-base-100/90 shadow-xl backdrop-blur">
-          <div className="border-b border-base-300 px-4 py-4">
-            <label className="input w-full">
-              <Search className="size-4.5 text-base-content/60" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && results[0]) {
-                    pinNote(results[0].filename, SEARCH_RESULT_PIN_DEPTH)
-                  }
-                }}
-                placeholder="Search notes…"
-              />
-              {searchLoading ? (
-                <LoaderCircle className="size-4 animate-spin text-base-content/60" />
-              ) : null}
-              <SearchModeToggle
-                mode={searchMode}
-                onToggle={() => setSearchMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy'))}
-              />
-            </label>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-            {!query.trim() ? (
-              <div className="px-2 py-2 text-sm text-base-content/60">Search to open a note.</div>
-            ) : null}
-
-            {query.trim() && results.length === 0 && !searchLoading ? (
-              <div className="px-2 py-2 text-sm text-base-content/60">No matches.</div>
-            ) : null}
-
-            <div className="space-y-2">
-              {results.map((result) => {
-                const isActive = pins.has(result.filename)
-                return (
-                  <button
-                    key={result.filename}
-                    type="button"
-                    className={[
-                      'block w-full  border px-4 py-3 text-left transition-colors',
-                      isActive
-                        ? 'border-primary/50 bg-primary/10'
-                        : 'border-transparent bg-base-200/70 hover:border-base-300 hover:bg-base-100'
-                    ].join(' ')}
-                    onClick={() => pinNote(result.filename, SEARCH_RESULT_PIN_DEPTH)}
-                  >
-                    <p className="line-clamp-4 text-xs leading-5">{result.preview}</p>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </aside>
+        <Sidebar
+          search={{
+            query,
+            onQueryChange: setQuery,
+            mode: searchMode,
+            onToggleMode: () => setSearchMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy')),
+            results,
+            loading: searchLoading
+          }}
+          pins={pins}
+          onSelectNote={(filename) => pinNote(filename, SEARCH_RESULT_PIN_DEPTH)}
+          onError={(error) => setErrorMessage(error.message)}
+        />
       </div>
 
       <dialog className={['modal', settingsOpen ? 'modal-open' : ''].join(' ')}>

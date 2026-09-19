@@ -90,6 +90,16 @@ export interface SearchResult {
   score: number
 }
 
+/** Which lifecycle timestamp (see RawNoteFile) the recent-notes list is ordered by. */
+export type RecentNotesSort = 'created' | 'updated' | 'opened'
+
+export interface RecentNote {
+  filename: string
+  preview: string
+  /** ISO-8601 value of the timestamp the list was sorted by. */
+  timestamp: string
+}
+
 /**
  * 'fuzzy' is the default FlexSearch-backed token search. 'raw' bypasses
  * tokenization entirely (literal, non-stripped substring matching) and
@@ -115,6 +125,15 @@ export interface NotesBootstrap {
 export interface NotesSearchResponse {
   graphPath: string
   results: SearchResult[]
+}
+
+export interface RecentNotesRequest {
+  sort: RecentNotesSort
+}
+
+export interface RecentNotesResponse {
+  /** Newest first. Notes never stamped with the requested timestamp are omitted. */
+  results: RecentNote[]
 }
 
 export interface NotesGraphResponse {
@@ -224,6 +243,7 @@ export interface UndoDeleteResponse {
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
   search: (query: string, mode?: SearchMode) => Promise<NotesSearchResponse>
+  recentNotes: (request: RecentNotesRequest) => Promise<RecentNotesResponse>
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>
   createNote: (request: CreateNoteRequest) => Promise<CreateNoteResponse>

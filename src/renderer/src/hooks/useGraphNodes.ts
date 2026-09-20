@@ -129,12 +129,10 @@ export function useGraphNodes({
 /**
  * Merges a freshly derived view into the current React Flow node array:
  *
- *  - Selection is React Flow's to own (it lands via `onNodesChange`, not
- *    `buildView`), so it is carried across from the current node by id.
- *  - When the graph and callbacks are unchanged, the previous node *object* is
- *    reused for any 'note' node whose layout position and card data are
- *    unchanged, so React Flow doesn't re-adopt it - re-adoption drops its
- *    measured size and blinks its edges.
+ * When the graph and callbacks are unchanged, the previous node *object* is
+ * reused for any 'note' node whose layout position and card data are
+ * unchanged, so React Flow doesn't re-adopt it - re-adoption drops its
+ * measured size and blinks its edges.
  */
 function reconcileNodes(
   current: NoteFlowNode[],
@@ -149,15 +147,12 @@ function reconcileNodes(
   let changed = current.length !== next.length
   const merged = next.map((node) => {
     const prev = byId.get(node.id)
-    const selected = prev?.selected ?? false
-    const desired: NoteFlowNode =
-      selected === (node.selected ?? false) ? node : { ...node, selected }
 
-    if (prev && reuseIdentity && sameNoteNode(prev, desired)) {
+    if (prev && reuseIdentity && sameNoteNode(prev, node)) {
       return prev
     }
     changed = true
-    return desired
+    return node
   })
 
   return changed ? merged : current

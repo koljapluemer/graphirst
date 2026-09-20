@@ -164,6 +164,8 @@ function FlowScene({
       edgeTypes={edgeTypes}
       nodesConnectable
       nodesDraggable
+      elementsSelectable={false}
+      nodesFocusable={false}
       onNodesChange={onNodesChange}
       onNodeDragStart={onNodeDragStart}
       onNodeDragStop={onNodeDragStop}
@@ -179,7 +181,6 @@ function FlowScene({
       maxZoom={1.5}
       panOnScroll
       panOnDrag={[1]}
-      selectionOnDrag
       proOptions={{ hideAttribution: true }}
       defaultEdgeOptions={{
         type: 'floating',

@@ -7,9 +7,9 @@ import { NODE_WIDTH, type LayoutedGraph } from '../lib/graph-layout'
 import type { GraphEdgePayload, NoteGraph } from '../../../shared/notes'
 
 // Resets React Flow's own default node-wrapper styling (border/shadow/padding) and
-// marks the wrapper as a hover/focus `group` so NoteNode's connect-handle dots and
-// selection ring (see NoteCard) can react to it - applied to every node kind since
-// all of them render inside a `.react-flow__node` we don't otherwise control.
+// marks the wrapper as a hover `group` so NoteNode's connect-handle dots can react
+// to it - applied to every node kind since all of them render inside a
+// `.react-flow__node` we don't otherwise control.
 //
 // `transition-transform` glides a node to its new spot when the layout changes.
 // React Flow drives the position by `transform` on this same element, so the
@@ -86,7 +86,6 @@ export function buildView(
       type: 'note' as const,
       position: item.position,
       width: item.width,
-      selectable: true,
       className: NODE_CLASS_NAME
     }
 
@@ -157,7 +156,6 @@ export function buildView(
       type: 'note',
       position: interaction.position,
       width: NODE_WIDTH,
-      selectable: true,
       draggable: false,
       className: NODE_CLASS_NAME,
       zIndex: EDITING_NODE_Z_INDEX,

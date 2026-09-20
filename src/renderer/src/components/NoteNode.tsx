@@ -40,10 +40,10 @@ export type NoteFlowNode = Node<NoteNodeData, 'note'>
 const CONNECT_HANDLE_POSITIONS = [Position.Top, Position.Right, Position.Bottom, Position.Left]
 
 // Memoized: during a node drag React Flow re-renders on every frame, but a
-// non-dragged node's `data`/`selected` props keep their identity (the view sync
+// non-dragged node's `data` prop keeps their identity (the view sync
 // in useGraphNodes doesn't run mid-drag), so this skips re-rendering every card -
 // and its markdown - on each frame.
-function NoteNode({ data, selected }: NodeProps<NoteFlowNode>): React.JSX.Element {
+function NoteNode({ data }: NodeProps<NoteFlowNode>): React.JSX.Element {
   return (
     <>
       {/*
@@ -91,7 +91,6 @@ function NoteNode({ data, selected }: NodeProps<NoteFlowNode>): React.JSX.Elemen
           note={data.note}
           pinDepth={data.pinDepth}
           isAnchor={data.isAnchor}
-          selected={selected}
           onDelete={data.onDelete}
           onEdit={data.onEdit}
           onUpdateExtra={data.onUpdateExtra}

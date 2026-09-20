@@ -11,7 +11,6 @@ export default function NoteCard({
   note,
   pinDepth,
   isAnchor,
-  selected,
   onDelete,
   onEdit,
   onUpdateExtra,
@@ -23,8 +22,6 @@ export default function NoteCard({
   note: GraphNodePayload
   pinDepth: number | null
   isAnchor: boolean
-  /** Whether React Flow currently has this node selected - drives the highlight ring. */
-  selected: boolean
   onDelete: (filename: string) => Promise<void>
   onEdit: (filename: string) => void
   onUpdateExtra: (filename: string, extraContent: string) => Promise<void>
@@ -53,11 +50,13 @@ export default function NoteCard({
   return (
     <article
       className={[
-        'note-card group-focus:ring-2 group-focus:ring-primary/40',
+        // React Flow's node wrapper sets `user-select: none` and a grab cursor;
+        // undo both here so the card's text can be selected (drag is limited to
+        // the handle below).
+        'note-card cursor-auto select-text',
         ' border bg-base-100 px-5 py-4 text-left shadow-xl',
         pinDepth !== null ? 'border-primary' : 'border-base-300',
-        isAnchor ? 'border-dashed' : '',
-        selected ? 'ring-2 ring-primary/40' : ''
+        isAnchor ? 'border-dashed' : ''
       ].join(' ')}
     >
       <div className="mb-3 flex min-h-6 items-center justify-between">

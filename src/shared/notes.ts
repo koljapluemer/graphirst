@@ -84,9 +84,26 @@ export interface NoteGraph {
   warnings: string[]
 }
 
+/** A span of text, as UTF-16 offsets into the string it refers to. */
+export interface MatchRange {
+  start: number
+  length: number
+}
+
+/** A short stretch of a note's text around a match, for when the match isn't in the card's preview. */
+export interface SearchExcerpt {
+  text: string
+  match: MatchRange
+}
+
 export interface SearchResult {
   filename: string
+  /** The note's opening text, same as the recent-notes list. */
   preview: string
+  /** Where the match sits within `preview`; null when it isn't visible there. */
+  previewMatch: MatchRange | null
+  /** Excerpt around the match; set exactly when the match is not visible in `preview`. */
+  excerpt: SearchExcerpt | null
   score: number
 }
 

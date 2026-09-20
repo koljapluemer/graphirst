@@ -1,7 +1,7 @@
 import type { IndexedNote, RecentNote, RecentNotesSort } from '../shared/notes'
+import { buildNotePreview } from './note-preview'
 
 export const RECENT_NOTES_LIMIT = 40
-const PREVIEW_LENGTH = 180
 
 /** Newest first; equal timestamps fall back to filename so the order is stable across refreshes. */
 function compareRecency(a: RecentNote, b: RecentNote): number {
@@ -29,7 +29,7 @@ function findInsertionIndex(ranked: RecentNote[], candidate: RecentNote): number
 function toRecentNote(note: IndexedNote, timestamp: string): RecentNote {
   return {
     filename: note.filename,
-    preview: note.bodyCompact.slice(0, PREVIEW_LENGTH) || 'Empty note',
+    preview: buildNotePreview(note),
     timestamp
   }
 }

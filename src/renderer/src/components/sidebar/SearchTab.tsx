@@ -59,6 +59,8 @@ export default function SearchTab({
             <NoteListItem
               key={result.filename}
               preview={result.preview}
+              previewMatch={result.previewMatch}
+              excerpt={result.excerpt}
               isPinned={pins.has(result.filename)}
               onSelect={() => onSelectNote(result.filename)}
             />

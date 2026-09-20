@@ -8,6 +8,7 @@ import { Document } from 'flexsearch'
 import { GraphWatcher, type GraphChangeBatch } from './graph-watcher'
 import { IMAGES_DIR_NAME, IMAGE_STEM_PATTERN, SUPPORTED_IMAGE_EXTENSIONS } from './graph-fs'
 import { selectRecentNotes } from './recent-notes'
+import { buildMatchDisplay, locateFuzzyMatch, type LocatedMatch } from './search-match-display'
 import type {
   AttachImageRequest,
   AttachImageResponse,
@@ -873,9 +874,8 @@ export class NoteStore extends EventEmitter {
         }
         this.searchIndex.add(doc)
 
-        // note.bodyCompact/extraCompact are already whitespace-compacted the same
-        // way buildPreview expects, so match indices the worker returns line up
-        // with the string rankRawResult/buildPreviewFromIndex actually slices.
+        // note.bodyCompact/extraCompact are what buildMatchDisplay slices, so the
+        // match indices the worker returns line up with them.
         corpusEntries.push({
           filename: note.filename,
           body: note.bodyCompact,
@@ -1551,11 +1551,9 @@ export class NoteStore extends EventEmitter {
       score -= EXTRA_ONLY_RANK_PENALTY
     }
 
-    return {
-      filename: note.filename,
-      preview: this.buildPreview(extraOnly ? note.extraCompact : note.bodyCompact, queryTokens),
-      score
-    }
+    const located = this.locateFuzzyMatch(note, normalizedQuery, queryTokens, extraOnly)
+
+    return { filename: note.filename, ...buildMatchDisplay(note, located), score }
   }
 
   private rankRawResult(match: RawSearchMatch, order: number): SearchResult | null {
@@ -1581,52 +1579,32 @@ export class NoteStore extends EventEmitter {
 
     return {
       filename: note.filename,
-      preview: extraOnly
-        ? this.buildPreviewFromIndex(note.extraCompact, match.extraIndex)
-        : this.buildPreviewFromIndex(note.bodyCompact, match.bodyIndex),
+      ...buildMatchDisplay(note, this.locateRawMatch(match)),
       score
     }
   }
 
-  private buildPreview(compact: string, queryTokens: string[]): string {
-    if (!compact) {
-      return 'Empty note'
-    }
-
-    const normalizedBody = this.normalize(compact)
-    const matchIndex = queryTokens.reduce<number>((closest, token) => {
-      const index = normalizedBody.indexOf(token)
-      if (index === -1) {
-        return closest
-      }
-      if (closest === -1) {
-        return index
-      }
-      return Math.min(closest, index)
-    }, -1)
-
-    return this.slicePreviewAroundIndex(compact, matchIndex)
+  private locateFuzzyMatch(
+    note: IndexedNote,
+    normalizedQuery: string,
+    queryTokens: string[],
+    extraOnly: boolean
+  ): LocatedMatch | null {
+    const normalize = (value: string): string => this.normalize(value)
+    const field = extraOnly ? 'extra' : 'body'
+    const compact = extraOnly ? note.extraCompact : note.bodyCompact
+    const range = locateFuzzyMatch(compact, normalizedQuery, queryTokens, normalize)
+    return range ? { field, range } : null
   }
 
-  /** Preview building for raw/regex matches, which already know the exact match position rather than needing to search for a token. */
-  private buildPreviewFromIndex(compact: string, matchIndex: number | null): string {
-    if (!compact) {
-      return 'Empty note'
+  private locateRawMatch(match: RawSearchMatch): LocatedMatch | null {
+    if (match.bodyIndex !== null) {
+      return { field: 'body', range: { start: match.bodyIndex, length: match.bodyLength } }
     }
-
-    return this.slicePreviewAroundIndex(compact, matchIndex ?? -1)
-  }
-
-  private slicePreviewAroundIndex(compact: string, matchIndex: number): string {
-    if (matchIndex === -1) {
-      return compact.slice(0, 180)
+    if (match.extraIndex !== null) {
+      return { field: 'extra', range: { start: match.extraIndex, length: match.extraLength } }
     }
-
-    const start = Math.max(0, matchIndex - 70)
-    const end = Math.min(compact.length, matchIndex + 110)
-    const prefix = start > 0 ? '…' : ''
-    const suffix = end < compact.length ? '…' : ''
-    return `${prefix}${compact.slice(start, end)}${suffix}`
+    return null
   }
 
   /**

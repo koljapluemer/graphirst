@@ -1,4 +1,4 @@
-/** Corpus entry mirrors what raw/regex search scans: whitespace-compacted body and extra content (same compaction buildPreview already applies, so match indices line up with preview slicing). */
+/** Corpus entry mirrors what raw/regex search scans: whitespace-compacted body and extra content (the same compaction the match display slices, so match indices line up). */
 export interface RawSearchCorpusEntry {
   filename: string
   body: string

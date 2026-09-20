@@ -164,8 +164,12 @@ function FlowScene({
       edgeTypes={edgeTypes}
       nodesConnectable
       nodesDraggable
-      elementsSelectable={false}
+      // Selection stays enabled on purpose: React Flow gives a node wrapper
+      // `pointer-events: none` unless it is selectable or draggable, which would
+      // make the (non-draggable) draft/edit cards unclickable. Nothing renders
+      // selection, so the only visible effect to switch off is the z-raise.
       nodesFocusable={false}
+      elevateNodesOnSelect={false}
       onNodesChange={onNodesChange}
       onNodeDragStart={onNodeDragStart}
       onNodeDragStop={onNodeDragStop}

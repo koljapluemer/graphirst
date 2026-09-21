@@ -38,6 +38,7 @@ import type {
   RawNoteFile,
   RecentNotesRequest,
   RecentNotesResponse,
+  SearchFilenamesResponse,
   SearchMode,
   SearchResult,
   UndoDeleteResponse,
@@ -63,8 +64,8 @@ const EXTRA_ONLY_RANK_PENALTY = 100_000
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
 const MAX_GRAPH_NODES = 140
-/** Candidate cap for the raw/regex worker scan, mirroring the fuzzy path's FlexSearch `limit`. */
-const RAW_SEARCH_CANDIDATE_LIMIT = 120
+/** Candidates ranked per query by both search modes (FlexSearch `limit` / raw worker scan cap). */
+const SEARCH_CANDIDATE_LIMIT = 120
 /** Defense in depth only - RE2 is linear-time, so this should never actually fire. */
 const RAW_SEARCH_TIMEOUT_MS = 5000
 /**
@@ -77,6 +78,14 @@ const INCREMENTAL_BATCH_LIMIT = 50
 interface StoredSettings {
   graphPath?: string
   pins?: PinSpec[]
+}
+
+interface FuzzyCandidate {
+  id: number | string
+}
+
+function byScoreThenFilename(left: SearchResult, right: SearchResult): number {
+  return right.score - left.score || left.filename.localeCompare(right.filename)
 }
 
 interface SearchDocument extends Record<string, string> {
@@ -265,19 +274,70 @@ export class NoteStore extends EventEmitter {
   }
 
   private searchFuzzy(trimmed: string): SearchResult[] {
-    const rawResults = this.searchIndex.search(trimmed, {
-      enrich: true,
-      limit: 120,
-      merge: true
-    })
+    const candidates = this.fuzzyCandidates(trimmed, SEARCH_CANDIDATE_LIMIT)
+    return this.rankFuzzyCandidates(candidates, trimmed).slice(0, MAX_SEARCH_RESULTS)
+  }
 
-    return rawResults
+  /**
+   * Filenames of every match (not just the displayed page), best first, capped at
+   * `cap`. Only the leading candidates are ranked - the same pool `search` ranks -
+   * so the best hits match what the sidebar shows, while `total` still counts every
+   * match. Runs off the same index/worker as `search`, so broad queries on a huge
+   * corpus never build previews for more than the ranked pool.
+   */
+  async searchFilenames(
+    query: string,
+    mode: SearchMode,
+    cap: number
+  ): Promise<SearchFilenamesResponse> {
+    await this.ensureIndexed()
+    this.assertIndexReady()
+
+    const trimmed = query.trim()
+    if (!trimmed) {
+      return { filenames: [], total: 0 }
+    }
+
+    const poolSize = Math.max(SEARCH_CANDIDATE_LIMIT, cap)
+    const everyLimit = Math.max(this.notes.size, poolSize)
+    const { total, ranked } =
+      mode === 'raw'
+        ? await this.rankRawPool(trimmed, poolSize, everyLimit)
+        : this.rankFuzzyPool(trimmed, poolSize, everyLimit)
+
+    return { filenames: ranked.slice(0, cap).map((result) => result.filename), total }
+  }
+
+  private rankFuzzyPool(
+    trimmed: string,
+    poolSize: number,
+    everyLimit: number
+  ): { total: number; ranked: SearchResult[] } {
+    const candidates = this.fuzzyCandidates(trimmed, everyLimit)
+    return {
+      total: candidates.length,
+      ranked: this.rankFuzzyCandidates(candidates.slice(0, poolSize), trimmed)
+    }
+  }
+
+  private async rankRawPool(
+    trimmed: string,
+    poolSize: number,
+    everyLimit: number
+  ): Promise<{ total: number; ranked: SearchResult[] }> {
+    const matches = await this.rawMatches(trimmed, everyLimit)
+    return { total: matches.length, ranked: this.rankRawMatches(matches.slice(0, poolSize)) }
+  }
+
+  private fuzzyCandidates(trimmed: string, limit: number): FuzzyCandidate[] {
+    return this.searchIndex.search(trimmed, { enrich: true, limit, merge: true })
+  }
+
+  private rankFuzzyCandidates(candidates: FuzzyCandidate[], trimmed: string): SearchResult[] {
+    return candidates
       .map((entry, index) => this.rankSearchResult(entry.id, index, trimmed))
       .filter((result): result is SearchResult => result !== null)
-      .sort(
-        (left, right) => right.score - left.score || left.filename.localeCompare(right.filename)
-      )
-      .slice(0, MAX_SEARCH_RESULTS)
+      .sort(byScoreThenFilename)
   }
 
   /**
@@ -287,17 +347,21 @@ export class NoteStore extends EventEmitter {
    * worker thread against a corpus mirrored on every reindex, so this never
    * blocks the Electron main process (see spawnSearchWorker/syncSearchWorker).
    */
-  private async searchRaw(trimmed: string): Promise<SearchResult[]> {
-    const { pattern, isRegex, flags } = this.parseRawQuery(trimmed)
-    const matches = await this.runRawSearch(pattern, isRegex, flags)
-
+  private rankRawMatches(matches: RawSearchMatch[]): SearchResult[] {
     return matches
       .map((match, index) => this.rankRawResult(match, index))
       .filter((result): result is SearchResult => result !== null)
-      .sort(
-        (left, right) => right.score - left.score || left.filename.localeCompare(right.filename)
-      )
-      .slice(0, MAX_SEARCH_RESULTS)
+      .sort(byScoreThenFilename)
+  }
+
+  private async searchRaw(trimmed: string): Promise<SearchResult[]> {
+    const matches = await this.rawMatches(trimmed, SEARCH_CANDIDATE_LIMIT)
+    return this.rankRawMatches(matches).slice(0, MAX_SEARCH_RESULTS)
+  }
+
+  private rawMatches(trimmed: string, limit: number): Promise<RawSearchMatch[]> {
+    const { pattern, isRegex, flags } = this.parseRawQuery(trimmed)
+    return this.runRawSearch(pattern, isRegex, flags, limit)
   }
 
   private parseRawQuery(trimmed: string): { pattern: string; isRegex: boolean; flags: string } {
@@ -311,7 +375,8 @@ export class NoteStore extends EventEmitter {
   private runRawSearch(
     pattern: string,
     isRegex: boolean,
-    flags: string
+    flags: string,
+    limit: number
   ): Promise<RawSearchMatch[]> {
     return new Promise((resolve, reject) => {
       const requestId = this.nextRawRequestId++
@@ -328,7 +393,7 @@ export class NoteStore extends EventEmitter {
         pattern,
         isRegex,
         flags,
-        limit: RAW_SEARCH_CANDIDATE_LIMIT
+        limit
       }
       this.searchWorker.postMessage(request)
     })

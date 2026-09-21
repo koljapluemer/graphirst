@@ -146,6 +146,13 @@ export interface NotesSearchResponse {
   results: SearchResult[]
 }
 
+export interface SearchFilenamesResponse {
+  /** Best matches first, truncated to the requested cap. */
+  filenames: string[]
+  /** Every match, including those cut by the cap. */
+  total: number
+}
+
 export interface RecentNotesRequest {
   sort: RecentNotesSort
 }
@@ -262,6 +269,11 @@ export interface UndoDeleteResponse {
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
   search: (query: string, mode?: SearchMode) => Promise<NotesSearchResponse>
+  searchFilenames: (
+    query: string,
+    mode: SearchMode,
+    cap: number
+  ) => Promise<SearchFilenamesResponse>
   recentNotes: (request: RecentNotesRequest) => Promise<RecentNotesResponse>
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>

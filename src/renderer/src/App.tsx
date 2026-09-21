@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, FolderOpen, LoaderCircle, Moon, Settings2, Sun } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import Sidebar from './components/sidebar/Sidebar'
-import { MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH, useNoteGraph } from './hooks/useNoteGraph'
+import {
+  MANUAL_PIN_DEPTH,
+  PIN_ALL_CAP,
+  PIN_ALL_DEPTH,
+  SEARCH_RESULT_PIN_DEPTH,
+  useNoteGraph
+} from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
 import { useTheme } from './hooks/useTheme'
 import type { IndexProgress, NotesBootstrap, SearchMode } from '../../shared/notes'
@@ -16,6 +22,7 @@ function App(): React.JSX.Element {
     loading: graphLoading,
     error: graphError,
     pinNote,
+    pinNotes,
     unpinNote,
     setPinDepth,
     clearPins,
@@ -30,6 +37,7 @@ function App(): React.JSX.Element {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [orphanBusy, setOrphanBusy] = useState(false)
   const [randomNoteBusy, setRandomNoteBusy] = useState(false)
+  const [pinAllBusy, setPinAllBusy] = useState(false)
   const { results, loading: searchLoading } = useNoteSearch(query, {
     enabled: bootstrap?.status === 'ready',
     onError: (error) => setErrorMessage(error.message),
@@ -143,6 +151,27 @@ function App(): React.JSX.Element {
     }
   }
 
+  const handlePinAllSearchResults = async (): Promise<void> => {
+    setPinAllBusy(true)
+    try {
+      const { filenames, total } = await window.api.notes.searchFilenames(
+        query,
+        searchMode,
+        PIN_ALL_CAP
+      )
+      pinNotes(filenames, PIN_ALL_DEPTH)
+      setErrorMessage(
+        total > filenames.length
+          ? `Pinned the first ${filenames.length} of ${total} matches.`
+          : null
+      )
+    } catch (error) {
+      setErrorMessage((error as Error).message)
+    } finally {
+      setPinAllBusy(false)
+    }
+  }
+
   const handleOpenRandomSearchResult = (): void => {
     if (results.length === 0) {
       return
@@ -205,6 +234,8 @@ function App(): React.JSX.Element {
               openRandomNoteBusy={randomNoteBusy}
               onOpenRandomSearchResult={handleOpenRandomSearchResult}
               openRandomSearchResultDisabled={results.length === 0}
+              onPinAllSearchResults={() => void handlePinAllSearchResults()}
+              pinAllSearchResultsDisabled={results.length === 0 || pinAllBusy}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />

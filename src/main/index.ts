@@ -162,6 +162,13 @@ app.whenReady().then(() => {
     return noteStore.search(query, mode)
   })
 
+  ipcMain.handle(
+    'notes:search-filenames',
+    async (_event, query: string, mode: SearchMode, cap: number) => {
+      return noteStore.searchFilenames(query, mode, cap)
+    }
+  )
+
   ipcMain.handle('notes:graph', async (_event, pins: PinSpec[]) => {
     return noteStore.openGraph(pins)
   })

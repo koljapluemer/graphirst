@@ -1,6 +1,16 @@
 import { useMemo } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { FilePlus, Layers, Maximize, PinOff, Search, Unplug, ZoomIn, ZoomOut } from 'lucide-react'
+import {
+  FilePlus,
+  Layers,
+  Maximize,
+  Pin,
+  PinOff,
+  Search,
+  Unplug,
+  ZoomIn,
+  ZoomOut
+} from 'lucide-react'
 import type { ToolbarAction } from './types'
 
 const ZOOM_DURATION_MS = 150
@@ -17,20 +27,24 @@ export function useGraphToolbarGroups({
   onPinOrphan,
   onOpenRandomNote,
   onOpenRandomSearchResult,
+  onPinAllSearchResults,
   unpinAllDisabled,
   pinOrphanDisabled,
   openRandomNoteDisabled,
-  openRandomSearchResultDisabled
+  openRandomSearchResultDisabled,
+  pinAllSearchResultsDisabled
 }: {
   onAddNote: () => void
   onUnpinAll: () => void
   onPinOrphan: () => void
   onOpenRandomNote: () => void
   onOpenRandomSearchResult: () => void
+  onPinAllSearchResults: () => void
   unpinAllDisabled: boolean
   pinOrphanDisabled: boolean
   openRandomNoteDisabled: boolean
   openRandomSearchResultDisabled: boolean
+  pinAllSearchResultsDisabled: boolean
 }): ToolbarAction[][] {
   const { zoomIn, zoomOut, fitView } = useReactFlow()
 
@@ -58,6 +72,13 @@ export function useGraphToolbarGroups({
           icon: Search,
           onClick: onOpenRandomSearchResult,
           disabled: openRandomSearchResultDisabled
+        },
+        {
+          id: 'pin-all-search-results',
+          label: 'Pin all from search',
+          icon: Pin,
+          onClick: onPinAllSearchResults,
+          disabled: pinAllSearchResultsDisabled
         },
         {
           id: 'pin-orphan',
@@ -94,10 +115,12 @@ export function useGraphToolbarGroups({
       onPinOrphan,
       onOpenRandomNote,
       onOpenRandomSearchResult,
+      onPinAllSearchResults,
       unpinAllDisabled,
       pinOrphanDisabled,
       openRandomNoteDisabled,
       openRandomSearchResultDisabled,
+      pinAllSearchResultsDisabled,
       zoomIn,
       zoomOut,
       fitView

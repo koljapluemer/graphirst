@@ -4,6 +4,9 @@ import type { NoteGraph, PinSpec } from '../../../shared/notes'
 export const MANUAL_PIN_DEPTH = 1
 export const SEARCH_RESULT_PIN_DEPTH = 2
 export const CREATED_NOTE_PIN_DEPTH = 1
+/** "Pin all" from search pins roots only, so a broad query doesn't flood the graph with neighbors. */
+export const PIN_ALL_DEPTH = 0
+export const PIN_ALL_CAP = 100
 
 const EMPTY_GRAPH: NoteGraph = { nodes: [], edges: [], truncated: false, warnings: [] }
 
@@ -13,6 +16,7 @@ export interface UseNoteGraphResult {
   loading: boolean
   error: string | null
   pinNote: (filename: string, depth: number) => void
+  pinNotes: (filenames: readonly string[], depth: number) => void
   unpinNote: (filename: string) => void
   setPinDepth: (filename: string, depth: number) => void
   clearPins: () => void
@@ -91,6 +95,20 @@ export function useNoteGraph(): UseNoteGraphResult {
     setPins((prev) => (prev.has(filename) ? prev : new Map(prev).set(filename, depth)))
   }, [])
 
+  const pinNotes = useCallback((filenames: readonly string[], depth: number) => {
+    setPins((prev) => {
+      const missing = filenames.filter((filename) => !prev.has(filename))
+      if (missing.length === 0) {
+        return prev
+      }
+      const next = new Map(prev)
+      for (const filename of missing) {
+        next.set(filename, depth)
+      }
+      return next
+    })
+  }, [])
+
   const unpinNote = useCallback((filename: string) => {
     setPins((prev) => {
       if (!prev.has(filename)) {
@@ -113,7 +131,18 @@ export function useNoteGraph(): UseNoteGraphResult {
     setRefetchNonce((n) => n + 1)
   }, [])
 
-  return { graph, pins, loading, error, pinNote, unpinNote, setPinDepth, clearPins, refetch }
+  return {
+    graph,
+    pins,
+    loading,
+    error,
+    pinNote,
+    pinNotes,
+    unpinNote,
+    setPinDepth,
+    clearPins,
+    refetch
+  }
 }
 
 function toPinSpecs(pins: Map<string, number>): PinSpec[] {

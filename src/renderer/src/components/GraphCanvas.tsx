@@ -41,6 +41,8 @@ interface GraphCanvasProps {
   openRandomNoteBusy: boolean
   onOpenRandomSearchResult: () => void
   openRandomSearchResultDisabled: boolean
+  onPinAllSearchResults: () => void
+  pinAllSearchResultsDisabled: boolean
 }
 
 interface FlowSceneProps {
@@ -57,6 +59,8 @@ interface FlowSceneProps {
   openRandomNoteBusy: boolean
   onOpenRandomSearchResult: () => void
   openRandomSearchResultDisabled: boolean
+  onPinAllSearchResults: () => void
+  pinAllSearchResultsDisabled: boolean
 }
 
 /**
@@ -78,7 +82,9 @@ function FlowScene({
   onOpenRandomNote,
   openRandomNoteBusy,
   onOpenRandomSearchResult,
-  openRandomSearchResultDisabled
+  openRandomSearchResultDisabled,
+  onPinAllSearchResults,
+  pinAllSearchResultsDisabled
 }: FlowSceneProps): React.JSX.Element {
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
 
@@ -148,10 +154,12 @@ function FlowScene({
     onPinOrphan: onPinRandomOrphan,
     onOpenRandomNote,
     onOpenRandomSearchResult,
+    onPinAllSearchResults,
     unpinAllDisabled: pins.size === 0,
     pinOrphanDisabled: pinRandomOrphanBusy,
     openRandomNoteDisabled: openRandomNoteBusy,
-    openRandomSearchResultDisabled
+    openRandomSearchResultDisabled,
+    pinAllSearchResultsDisabled
   })
 
   return (
@@ -244,7 +252,9 @@ export default function GraphCanvas({
   onOpenRandomNote,
   openRandomNoteBusy,
   onOpenRandomSearchResult,
-  openRandomSearchResultDisabled
+  openRandomSearchResultDisabled,
+  onPinAllSearchResults,
+  pinAllSearchResultsDisabled
 }: GraphCanvasProps): React.JSX.Element {
   if (!graph) {
     return (
@@ -274,6 +284,8 @@ export default function GraphCanvas({
           openRandomNoteBusy={openRandomNoteBusy}
           onOpenRandomSearchResult={onOpenRandomSearchResult}
           openRandomSearchResultDisabled={openRandomSearchResultDisabled}
+          onPinAllSearchResults={onPinAllSearchResults}
+          pinAllSearchResultsDisabled={pinAllSearchResultsDisabled}
         />
       </ReactFlowProvider>
     </div>

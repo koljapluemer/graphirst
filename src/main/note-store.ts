@@ -1787,7 +1787,7 @@ export class NoteStore extends EventEmitter {
 
     return {
       nodes: Array.from(context.nodes.entries())
-        .map(([filename, meta]) => this.buildGraphNode(filename, meta))
+        .map(([filename, meta]) => this.buildGraphNode(filename, meta, context.nodes))
         .sort(
           (left, right) =>
             left.depth - right.depth ||
@@ -1806,7 +1806,11 @@ export class NoteStore extends EventEmitter {
     }
   }
 
-  private buildGraphNode(filename: string, meta: NodeMeta): GraphNodePayload {
+  private buildGraphNode(
+    filename: string,
+    meta: NodeMeta,
+    shown: ReadonlyMap<string, NodeMeta>
+  ): GraphNodePayload {
     // Every filename that reaches context.nodes is guaranteed to back a real note:
     // pin roots for missing notes are skipped in registerPinRoot, and neighbors are
     // only ever registered through buildOutgoingRelations/buildIncomingRelations,
@@ -1820,12 +1824,39 @@ export class NoteStore extends EventEmitter {
       extraContent: note.extraContent,
       depth: meta.depth,
       degree: note.degree,
+      hiddenNeighbors: this.countHiddenNeighbors(note, shown),
       notes: note.notes,
       created: note.created,
       updated: note.updated,
       opened: note.opened,
       relationshipsChanged: note.relationshipsChanged
     }
+  }
+
+  /**
+   * Distinct notes related to `note` in either direction that pinning it would
+   * render but the graph being built does not contain. Unlike `degree` this counts
+   * neighbours, not relations (reciprocal / multi-label pairs and self-loops fold
+   * away) and skips notes `isRenderableNode` would never show, so it matches
+   * what expanding actually reveals. Walks the adjacency maps unsorted - the graph
+   * is capped at MAX_GRAPH_NODES, so this stays cheap even around a huge hub.
+   */
+  private countHiddenNeighbors(note: IndexedNote, shown: ReadonlyMap<string, NodeMeta>): number {
+    const neighbors = new Set<string>()
+    for (const rel of note.rels) {
+      neighbors.add(rel.target)
+    }
+    for (const ref of this.reverseRefs.get(note.filename) ?? []) {
+      neighbors.add(ref.source)
+    }
+
+    let hidden = 0
+    for (const neighbor of neighbors) {
+      if (neighbor !== note.filename && !shown.has(neighbor) && this.isRenderableNode(neighbor)) {
+        hidden += 1
+      }
+    }
+    return hidden
   }
 
   private getOutgoing(filename: string): NoteLink[] {

@@ -11,7 +11,14 @@ import type { GraphNodePayload, NoteGraph } from '../../../shared/notes'
 
 export const NODE_WIDTH = 370
 export const NODE_MIN_HEIGHT = 220
-const NODE_GAP = 64
+
+// A hidden-relations badge (see graph-hidden-relations) hangs below its card:
+// `HIDDEN_BADGE_GAP` clear of the card's bottom edge, then `HIDDEN_BADGE_HEIGHT`
+// tall (daisy `btn-xs`). It lives outside ELK, so the gap between vertically
+// stacked cards is widened to leave that footprint free plus the usual clearance.
+export const HIDDEN_BADGE_GAP = 24
+const HIDDEN_BADGE_HEIGHT = 24
+const NODE_GAP = HIDDEN_BADGE_GAP + HIDDEN_BADGE_HEIGHT + 56
 const LAYER_GAP = 200
 
 // Fixed footprint reserved for every edge's label, so ELK's layered algorithm
@@ -136,10 +143,10 @@ export function layoutHeightsDrifted(
   })
 }
 
-// Clearance (px) forced between two card rectangles by separateOverlaps. Roughly
-// ELK's own `elk.spacing.nodeNode`, so post-ELK separation and ELK's spacing
+// Clearance (px) forced between two card rectangles by separateOverlaps. Just
+// under ELK's own `elk.spacing.nodeNode`, so post-ELK separation and ELK's spacing
 // agree on what "not overlapping" means.
-const SEPARATION_MARGIN = 56
+const SEPARATION_MARGIN = NODE_GAP - 8
 // Safety cap - card-sized boxes with local pushes settle well inside this.
 const SEPARATION_ITERATIONS = 60
 

@@ -17,10 +17,12 @@ import type { ImageState } from '../components/DraftNoteCard'
 import {
   DRAFT_ID_PREFIX,
   IDLE_INTERACTION,
+  connectionTargetFilename,
   type ConnectingInteraction,
   type DraftInteraction,
   type Interaction
 } from '../components/graph-interaction'
+import { EXPAND_PIN_DEPTH, needsExpansion } from '../components/graph-hidden-relations'
 import type { ViewCallbacks } from '../components/graph-view-model'
 import { useUndoToast, type UndoAction } from './useUndoToast'
 import { CREATED_NOTE_PIN_DEPTH, MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH } from './useNoteGraph'
@@ -86,12 +88,8 @@ export function useGraphInteraction({
         return
       }
 
-      const targetFilename = connectionState.toNode?.id
-      if (
-        targetFilename &&
-        targetFilename !== sourceFilename &&
-        !targetFilename.startsWith(DRAFT_ID_PREFIX)
-      ) {
+      const targetFilename = connectionTargetFilename(connectionState.toNode)
+      if (targetFilename && targetFilename !== sourceFilename) {
         setInteraction({ type: 'connecting', source: sourceFilename, target: targetFilename })
         return
       }
@@ -286,6 +284,27 @@ export function useGraphInteraction({
     [onPinNote]
   )
 
+  // A hidden-relations badge was clicked: pin its note deep enough that its direct
+  // relations render. Guarded on the same rule the badge disables itself with, so
+  // a stray second click while the new graph is still loading is a no-op instead
+  // of a redundant refetch. The note also becomes the layout anchor, so the
+  // notes that appear are seeded next to it rather than next to an older anchor.
+  const handleExpandHiddenRelations = useCallback(
+    (filename: string) => {
+      const pinDepth = pins.get(filename) ?? null
+      if (!needsExpansion(pinDepth)) {
+        return
+      }
+      markInteraction(filename)
+      if (pinDepth === null) {
+        onPinNote(filename, EXPAND_PIN_DEPTH)
+      } else {
+        onSetPinDepth(filename, EXPAND_PIN_DEPTH)
+      }
+    },
+    [pins, markInteraction, onPinNote, onSetPinDepth]
+  )
+
   // Left open after picking a result (see PaneSearchMenu) rather than resetting
   // to idle, so the same right-click session can pin several search matches in
   // a row without reopening the menu each time.
@@ -318,7 +337,8 @@ export function useGraphInteraction({
       onPinNote: handlePinNote,
       onUnpinNote,
       onChangeDepth: onSetPinDepth,
-      onDeleteNoteEntry: handleDeleteNoteEntry
+      onDeleteNoteEntry: handleDeleteNoteEntry,
+      onExpandHiddenRelations: handleExpandHiddenRelations
     }),
     [
       handleDeleteNote,
@@ -332,7 +352,8 @@ export function useGraphInteraction({
       handlePinNote,
       onUnpinNote,
       onSetPinDepth,
-      handleDeleteNoteEntry
+      handleDeleteNoteEntry,
+      handleExpandHiddenRelations
     ]
   )
 

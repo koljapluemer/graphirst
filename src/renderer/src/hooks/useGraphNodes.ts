@@ -6,13 +6,15 @@ import {
   type XYPosition
 } from '@xyflow/react'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import type { GraphFlowNode } from '../components/graph-flow-node'
 import type { NoteFlowNode } from '../components/NoteNode'
+import type { HiddenRelationsFlowNode } from '../components/HiddenRelationsNode'
 import { DRAFT_ID_PREFIX, type Interaction } from '../components/graph-interaction'
 import { buildView, type ViewCallbacks } from '../components/graph-view-model'
 import type { LayoutedGraph } from '../lib/graph-layout'
 import type { NoteGraph } from '../../../shared/notes'
 
-const EMPTY_NODES: NoteFlowNode[] = []
+const EMPTY_NODES: GraphFlowNode[] = []
 const EMPTY_EDGES: Edge[] = []
 
 export interface UseGraphNodesParams {
@@ -33,11 +35,11 @@ export interface UseGraphNodesParams {
 }
 
 export interface UseGraphNodesResult {
-  nodes: NoteFlowNode[]
+  nodes: GraphFlowNode[]
   edges: Edge[]
-  onNodesChange: OnNodesChange<NoteFlowNode>
-  onNodeDragStart: OnNodeDrag<NoteFlowNode>
-  onNodeDragStop: OnNodeDrag<NoteFlowNode>
+  onNodesChange: OnNodesChange<GraphFlowNode>
+  onNodeDragStart: OnNodeDrag<GraphFlowNode>
+  onNodeDragStop: OnNodeDrag<GraphFlowNode>
 }
 
 /**
@@ -64,7 +66,7 @@ export function useGraphNodes({
   onDragStop,
   onManualDrop
 }: UseGraphNodesParams): UseGraphNodesResult {
-  const [nodes, setNodes, onNodesChange] = useNodesState<NoteFlowNode>(EMPTY_NODES)
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(EMPTY_NODES)
   // Edges are plain state: they carry no interaction changes we round-trip
   // (labels are edited straight through the IPC bridge), so no `onEdgesChange`.
   const [edges, setEdges] = useState<Edge[]>(EMPTY_EDGES)
@@ -101,11 +103,11 @@ export function useGraphNodes({
     }
   }, [graph, manualPositionsRef])
 
-  const onNodeDragStart = useCallback<OnNodeDrag<NoteFlowNode>>(() => {
+  const onNodeDragStart = useCallback<OnNodeDrag<GraphFlowNode>>(() => {
     onDragStart()
   }, [onDragStart])
 
-  const onNodeDragStop = useCallback<OnNodeDrag<NoteFlowNode>>(
+  const onNodeDragStop = useCallback<OnNodeDrag<GraphFlowNode>>(
     (_event, node) => {
       if (node.type === 'note' && !node.id.startsWith(DRAFT_ID_PREFIX)) {
         // Whole pixels: a card on a sub-pixel x re-measures its height and
@@ -130,15 +132,15 @@ export function useGraphNodes({
  * Merges a freshly derived view into the current React Flow node array:
  *
  * When the graph and callbacks are unchanged, the previous node *object* is
- * reused for any 'note' node whose layout position and card data are
- * unchanged, so React Flow doesn't re-adopt it - re-adoption drops its
- * measured size and blinks its edges.
+ * reused for any node whose layout position and card data are unchanged (see
+ * sameNode), so React Flow doesn't re-adopt it - re-adoption drops its measured
+ * size and blinks its edges.
  */
 function reconcileNodes(
-  current: NoteFlowNode[],
-  next: NoteFlowNode[],
+  current: GraphFlowNode[],
+  next: GraphFlowNode[],
   reuseIdentity: boolean
-): NoteFlowNode[] {
+): GraphFlowNode[] {
   if (current.length === 0) {
     return next
   }
@@ -148,7 +150,7 @@ function reconcileNodes(
   const merged = next.map((node) => {
     const prev = byId.get(node.id)
 
-    if (prev && reuseIdentity && sameNoteNode(prev, node)) {
+    if (prev && reuseIdentity && sameNode(prev, node)) {
       return prev
     }
     changed = true
@@ -156,6 +158,17 @@ function reconcileNodes(
   })
 
   return changed ? merged : current
+}
+
+/** Per-kind "nothing to re-adopt" rule; a kind with no rule is always rebuilt. */
+function sameNode(a: GraphFlowNode, b: GraphFlowNode): boolean {
+  if (a.type === 'note' && b.type === 'note') {
+    return sameNoteNode(a, b)
+  }
+  if (a.type === 'hiddenRelations' && b.type === 'hiddenRelations') {
+    return sameHiddenRelationsNode(a, b)
+  }
+  return false
 }
 
 function sameNoteNode(a: NoteFlowNode, b: NoteFlowNode): boolean {
@@ -172,6 +185,16 @@ function sameNoteNode(a: NoteFlowNode, b: NoteFlowNode): boolean {
     a.data.note === b.data.note &&
     a.data.pinDepth === b.data.pinDepth &&
     a.data.isAnchor === b.data.isAnchor
+  )
+}
+
+function sameHiddenRelationsNode(a: HiddenRelationsFlowNode, b: HiddenRelationsFlowNode): boolean {
+  return (
+    a.position.x === b.position.x &&
+    a.position.y === b.position.y &&
+    a.parentId === b.parentId &&
+    a.data.hiddenCount === b.data.hiddenCount &&
+    a.data.expandable === b.data.expandable
   )
 }
 

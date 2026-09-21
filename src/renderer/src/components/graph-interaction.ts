@@ -1,4 +1,4 @@
-import type { XYPosition } from '@xyflow/react'
+import type { InternalNode, XYPosition } from '@xyflow/react'
 
 /**
  * What the user is currently doing on the canvas, beyond just looking at it.
@@ -43,3 +43,20 @@ export const IDLE_INTERACTION: Interaction = { type: 'idle' }
 
 /** Draft/edit client ids are prefixed so the layout/drag layers can skip them. */
 export const DRAFT_ID_PREFIX = 'draft:'
+
+/**
+ * The note a connection drag ended on, or null when it didn't end on one.
+ * React Flow resolves the drop to the nearest handle within `connectionRadius`
+ * even if that handle isn't connectable, so the node it reports can be a draft
+ * card (never a target) or a hidden-relations badge - which sits right under its
+ * note, so a drop that lands on it means that note.
+ */
+export function connectionTargetFilename(toNode: InternalNode | null): string | null {
+  if (!toNode) {
+    return null
+  }
+  if (toNode.type === 'hiddenRelations') {
+    return toNode.parentId ?? null
+  }
+  return toNode.id.startsWith(DRAFT_ID_PREFIX) ? null : toNode.id
+}

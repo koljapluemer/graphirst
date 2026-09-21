@@ -8,9 +8,11 @@ import {
 } from '@xyflow/react'
 import { useCallback, useRef, useState } from 'react'
 import FloatingEdge from './FloatingEdge'
+import HiddenRelationsNode from './HiddenRelationsNode'
 import NoteNode from './NoteNode'
 import PaneSearchMenu from './PaneSearchMenu'
 import PendingConnectionEdge from './PendingConnectionEdge'
+import { FOLLOWERS_STOP_GLIDING_CLASS_NAME } from './graph-node-style'
 import GraphToolbar from './graph-toolbar/GraphToolbar'
 import { IDLE_INTERACTION, type Interaction } from './graph-interaction'
 import { useGraphToolbarGroups } from './graph-toolbar/useGraphToolbarGroups'
@@ -20,7 +22,7 @@ import { useGraphNodes } from '../hooks/useGraphNodes'
 import type { NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
-const nodeTypes = { note: NoteNode }
+const nodeTypes = { note: NoteNode, hiddenRelations: HiddenRelationsNode }
 
 const CONNECTION_RADIUS = 200
 
@@ -156,7 +158,7 @@ function FlowScene({
     <ReactFlow
       fitView
       colorMode={colorMode}
-      className="[&_.react-flow__renderer]:cursor-grab [&_.react-flow__renderer:active]:cursor-grabbing [&_.react-flow__viewport]:cursor-grab [&_.react-flow__viewport:active]:cursor-grabbing"
+      className={`${dragging ? FOLLOWERS_STOP_GLIDING_CLASS_NAME : ''} [&_.react-flow__renderer]:cursor-grab [&_.react-flow__renderer:active]:cursor-grabbing [&_.react-flow__viewport]:cursor-grab [&_.react-flow__viewport:active]:cursor-grabbing`}
       nodeOrigin={[0.5, 0.5]}
       nodes={nodes}
       edges={edges}

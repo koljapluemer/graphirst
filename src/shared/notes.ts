@@ -60,6 +60,8 @@ export interface GraphNodePayload {
   /** Hops from the nearest pin that discovered this node. Informational only. */
   depth: number
   degree: number
+  /** Distinct renderable notes related to this one (either direction) that are not on the canvas - what pinning it at depth 1 would bring in. */
+  hiddenNeighbors: number
   notes: string[]
   /** ISO-8601 lifecycle timestamps (see RawNoteFile). Null until this app has stamped the corresponding event. */
   created: string | null

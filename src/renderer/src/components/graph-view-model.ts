@@ -1,23 +1,12 @@
 import type { Edge } from '@xyflow/react'
 import type { ImageState } from './DraftNoteCard'
-import type { NoteFlowNode } from './NoteNode'
+import type { GraphFlowNode } from './graph-flow-node'
 import { mergeRelationsIntoEdges } from './graph-edges'
+import { buildHiddenRelations } from './graph-hidden-relations'
 import type { ConnectingInteraction, DraftInteraction, Interaction } from './graph-interaction'
+import { NODE_CLASS_NAME } from './graph-node-style'
 import { NODE_WIDTH, type LayoutedGraph } from '../lib/graph-layout'
 import type { GraphEdgePayload, NoteGraph } from '../../../shared/notes'
-
-// Resets React Flow's own default node-wrapper styling (border/shadow/padding) and
-// marks the wrapper as a hover `group` so NoteNode's connect-handle dots can react
-// to it - applied to every node kind since all of them render inside a
-// `.react-flow__node` we don't otherwise control.
-//
-// `transition-transform` glides a node to its new spot when the layout changes.
-// React Flow drives the position by `transform` on this same element, so the
-// transition has to be killed while the node is being dragged (`.dragging` is
-// React Flow's own class) - otherwise every per-frame drag update animates over
-// 300ms and the node lags the cursor.
-const NODE_CLASS_NAME =
-  'group border-0 bg-transparent shadow-none p-0 transition-transform duration-300 ease-in-out [&.dragging]:transition-none'
 
 // Draft/edit cards can grow past a neighbor's estimated layout slot while their
 // content changes - keep them above everything else instead of trying to keep
@@ -49,6 +38,7 @@ export interface ViewCallbacks {
   onUnpinNote: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
   onDeleteNoteEntry: (filename: string, index: number) => Promise<void>
+  onExpandHiddenRelations: (filename: string) => void
 }
 
 /**
@@ -75,8 +65,8 @@ export function buildView(
   interaction: Interaction,
   anchorFilename: string | null,
   callbacks: ViewCallbacks
-): { nodes: NoteFlowNode[]; edges: Edge[] } {
-  const nodes: NoteFlowNode[] = layouted.nodes.map((item) => {
+): { nodes: GraphFlowNode[]; edges: Edge[] } {
+  const nodes: GraphFlowNode[] = layouted.nodes.map((item) => {
     // No `height` here - the card sizes to its own content (see .note-card in
     // main.css) and React Flow measures the real rendered height via its
     // internal ResizeObserver instead of us forcing one onto the DOM.
@@ -199,5 +189,17 @@ export function buildView(
     }
   }
 
-  return { nodes, edges }
+  // Appended last: React Flow needs a child node (the badge) after its parent in
+  // the array, and every parent note is already in `nodes` by now.
+  const hiddenRelations = buildHiddenRelations(
+    layouted,
+    pins,
+    interaction.type === 'edit' ? interaction.filename : null,
+    callbacks.onExpandHiddenRelations
+  )
+
+  return {
+    nodes: [...nodes, ...hiddenRelations.nodes],
+    edges: [...edges, ...hiddenRelations.edges]
+  }
 }

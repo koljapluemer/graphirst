@@ -1,9 +1,10 @@
-import { ExternalLink, FileText, GripVertical, Pencil, Trash2, X } from 'lucide-react'
+import { ExternalLink, FileText, GripVertical, Maximize2, Pencil, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExtraContentModal from './ExtraContentModal'
 import MediaPreview from './MediaPreview'
+import MediaModal from './MediaModal'
 import PinControl from './PinControl'
 import { mediaUrl } from '../lib/media'
 import { isVideoFilename } from '../../../shared/media'
@@ -35,6 +36,7 @@ export default function NoteCard({
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [extraModalOpen, setExtraModalOpen] = useState(false)
+  const [mediaModalOpen, setMediaModalOpen] = useState(false)
   const hasExtra = note.extraContent.trim().length > 0
 
   const handleDelete = async (): Promise<void> => {
@@ -82,6 +84,19 @@ export default function NoteCard({
           />
         </div>
         <div className="flex items-center gap-1">
+          {note.image ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-xs rounded-full"
+              onClick={(event) => {
+                event.stopPropagation()
+                setMediaModalOpen(true)
+              }}
+              title="Enlarge media"
+            >
+              <Maximize2 className="size-3.5" />
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn btn-ghost btn-xs rounded-full"
@@ -194,6 +209,13 @@ export default function NoteCard({
           value={note.extraContent}
           onSave={(extraContent) => onUpdateExtra(note.filename, extraContent)}
           onClose={() => setExtraModalOpen(false)}
+        />
+      ) : null}
+      {mediaModalOpen && note.image ? (
+        <MediaModal
+          filename={note.image}
+          noteFilename={note.filename}
+          onClose={() => setMediaModalOpen(false)}
         />
       ) : null}
     </article>

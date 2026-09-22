@@ -211,6 +211,16 @@ export interface ClearImageRequest {
   filename: string
 }
 
+export interface MediaFileRequest {
+  /** Filename inside the graph folder's images/ subdirectory. */
+  image: string
+}
+
+export interface CopyMediaRequest {
+  /** Chromium-decoded image re-encoded as PNG for Electron's native clipboard API. */
+  pngDataUrl: string
+}
+
 export interface ConnectNotesRequest {
   source: string
   target: string
@@ -282,6 +292,9 @@ export interface NotesApi {
   updateNote: (request: UpdateNoteRequest) => Promise<void>
   attachImage: (request: AttachImageRequest) => Promise<AttachImageResponse>
   clearImage: (request: ClearImageRequest) => Promise<void>
+  getMediaDataUrl: (request: MediaFileRequest) => Promise<string>
+  copyMedia: (request: CopyMediaRequest) => Promise<void>
+  copyMediaPath: (request: MediaFileRequest) => Promise<void>
   connectNotes: (request: ConnectNotesRequest) => Promise<ConnectNotesResponse>
   updateRelationLabel: (request: UpdateRelationRequest) => Promise<void>
   deleteRelation: (request: DeleteRelationRequest) => Promise<void>

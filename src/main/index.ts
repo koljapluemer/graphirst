@@ -1,5 +1,16 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  nativeImage,
+  net,
+  protocol
+} from 'electron'
 import { basename, join } from 'path'
+import { readFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -8,11 +19,13 @@ import type {
   AttachImageRequest,
   ClearImageRequest,
   ConnectNotesRequest,
+  CopyMediaRequest,
   CreateNoteRequest,
   DeleteNoteEntryRequest,
   DeleteNoteRequest,
   DeleteRelationRequest,
   IndexProgress,
+  MediaFileRequest,
   PinSpec,
   RandomNoteRequest,
   RandomOrphanRequest,
@@ -214,6 +227,35 @@ app.whenReady().then(() => {
 
   ipcMain.handle('notes:clear-image', async (_event, request: ClearImageRequest) => {
     return noteStore.clearImage(request)
+  })
+
+  ipcMain.handle('notes:get-media-data-url', async (_event, request: MediaFileRequest) => {
+    const path = noteStore.mediaFilePath(request.image)
+    const extension = request.image.split('.').pop()?.toLowerCase() ?? ''
+    const mimeType = MEDIA_MIME_TYPES[extension]
+    if (!mimeType?.startsWith('image/')) {
+      throw new Error('The media file is not an image.')
+    }
+
+    const data = await readFile(path)
+    return `data:${mimeType};base64,${data.toString('base64')}`
+  })
+
+  ipcMain.handle('notes:copy-media', (_event, request: CopyMediaRequest) => {
+    const match = /^data:image\/png;base64,(.+)$/.exec(request.pngDataUrl)
+    if (!match) {
+      throw new Error('Invalid clipboard image data.')
+    }
+
+    const image = nativeImage.createFromBuffer(Buffer.from(match[1], 'base64'))
+    if (image.isEmpty()) {
+      throw new Error('The clipboard PNG could not be read.')
+    }
+    clipboard.writeImage(image)
+  })
+
+  ipcMain.handle('notes:copy-media-path', (_event, request: MediaFileRequest) => {
+    clipboard.writeText(noteStore.mediaFilePath(request.image))
   })
 
   ipcMain.handle('notes:connect', async (_event, request: ConnectNotesRequest) => {

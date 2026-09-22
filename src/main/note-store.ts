@@ -2119,6 +2119,19 @@ export class NoteStore extends EventEmitter {
     return join(this.imagesDir(), filename)
   }
 
+  /** Resolves an indexed media filename without allowing traversal outside images/. */
+  mediaFilePath(filename: string): string {
+    const parsed = this.parseImageName(filename)
+    if (
+      filename !== basename(filename) ||
+      !parsed ||
+      this.imagesByStem.get(parsed.stem) !== filename
+    ) {
+      throw new Error('Unknown media file.')
+    }
+    return this.imageFilePath(filename)
+  }
+
   /** `foo.json` -> `foo`. The stem an image filename must be prefixed with to belong to this note. */
   private stemOf(noteFilename: string): string {
     return noteFilename.replace(/\.json$/, '')

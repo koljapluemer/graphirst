@@ -6,7 +6,14 @@ import { basename, join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { Document } from 'flexsearch'
 import { GraphWatcher, type GraphChangeBatch } from './graph-watcher'
-import { IMAGES_DIR_NAME, IMAGE_STEM_PATTERN, SUPPORTED_IMAGE_EXTENSIONS } from './graph-fs'
+import {
+  IMAGES_DIR_NAME,
+  IMAGE_STEM_PATTERN,
+  SUPPORTED_IMAGE_EXTENSIONS,
+  SUPPORTED_MEDIA_EXTENSIONS,
+  SUPPORTED_VIDEO_EXTENSIONS
+} from './graph-fs'
+import { MAX_VIDEO_ATTACHMENT_BYTES } from '../shared/media'
 import { selectRecentNotes } from './recent-notes'
 import { buildMatchDisplay, locateFuzzyMatch, type LocatedMatch } from './search-match-display'
 import type {
@@ -86,6 +93,15 @@ interface FuzzyCandidate {
 
 function byScoreThenFilename(left: SearchResult, right: SearchResult): number {
   return right.score - left.score || left.filename.localeCompare(right.filename)
+}
+
+/** `('image', 'jpeg')` -> `'jpg'`, `('video', 'quicktime')` -> `'mov'`; otherwise the subtype as-is. */
+function normalizeMediaExtension(kind: 'image' | 'video', subtype: string): string {
+  const lower = subtype.toLowerCase()
+  if (kind === 'image') {
+    return lower === 'jpeg' ? 'jpg' : lower
+  }
+  return lower === 'quicktime' ? 'mov' : lower
 }
 
 interface SearchDocument extends Record<string, string> {
@@ -580,8 +596,8 @@ export class NoteStore extends EventEmitter {
 
   /**
    * Writes `dataUrl`'s bytes to `images/<noteStem>-<epochMillis><ext>`, replacing
-   * any image already attached to that note. The note JSON is untouched - the
-   * link is by filename stem (see `../note`).
+   * any image or video already attached to that note. The note JSON is untouched -
+   * the link is by filename stem (see `../note`).
    */
   async attachImage(request: AttachImageRequest): Promise<AttachImageResponse> {
     await this.ensureIndexed()
@@ -590,15 +606,27 @@ export class NoteStore extends EventEmitter {
       throw new Error(`Could not find "${request.filename}" in ${this.graphPath}.`)
     }
 
-    const match = /^data:image\/(\w+);base64,(.+)$/.exec(request.dataUrl)
+    const match = /^data:(image|video)\/(\w+);base64,(.+)$/.exec(request.dataUrl)
     if (!match) {
-      throw new Error('Unsupported image data.')
+      throw new Error('Unsupported media data.')
     }
 
-    const [, subtype, base64] = match
-    const extension = subtype === 'jpeg' ? 'jpg' : subtype
-    if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) {
-      throw new Error(`Unsupported image type: ${extension}.`)
+    const [, kindMatch, subtype, base64] = match
+    const kind = kindMatch as 'image' | 'video'
+    const extension = normalizeMediaExtension(kind, subtype)
+    const allowedExtensions =
+      kind === 'image' ? SUPPORTED_IMAGE_EXTENSIONS : SUPPORTED_VIDEO_EXTENSIONS
+    if (!allowedExtensions.has(extension)) {
+      throw new Error(`Unsupported ${kind} type: ${extension}.`)
+    }
+
+    if (kind === 'video') {
+      // Exact for unpadded base64, off by at most 2 bytes with padding - fine for a size gate.
+      const byteLength = Math.ceil((base64.length * 3) / 4)
+      if (byteLength > MAX_VIDEO_ATTACHMENT_BYTES) {
+        const maxMb = Math.round(MAX_VIDEO_ATTACHMENT_BYTES / (1024 * 1024))
+        throw new Error(`Video is too large; keep clips under ${maxMb}MB.`)
+      }
     }
 
     const stem = this.stemOf(request.filename)
@@ -2108,10 +2136,10 @@ export class NoteStore extends EventEmitter {
     }
   }
 
-  /** `foo-1724900000000.webp` -> `{ stem: 'foo', ts: 1724900000000 }`, or null when it isn't a note image. */
+  /** `foo-1724900000000.webp` -> `{ stem: 'foo', ts: 1724900000000 }`, or null when it isn't a note's attached media. */
   private parseImageName(entry: string): { stem: string; ts: number } | null {
     const dot = entry.lastIndexOf('.')
-    if (dot <= 0 || !SUPPORTED_IMAGE_EXTENSIONS.has(entry.slice(dot + 1).toLowerCase())) {
+    if (dot <= 0 || !SUPPORTED_MEDIA_EXTENSIONS.has(entry.slice(dot + 1).toLowerCase())) {
       return null
     }
     const stemMatch = IMAGE_STEM_PATTERN.exec(entry.slice(0, dot))

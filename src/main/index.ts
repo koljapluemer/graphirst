@@ -1,6 +1,6 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
-import { readFile } from 'node:fs/promises'
+import { app, shell, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
 import { basename, join } from 'path'
+import { pathToFileURL } from 'node:url'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { NOTES_CHANGED_EVENT, NOTES_INDEX_PROGRESS_EVENT, NoteStore } from './note-store'
@@ -29,13 +29,23 @@ const MEDIA_MIME_TYPES: Record<string, string> = {
   png: 'image/png',
   webp: 'image/webp',
   gif: 'image/gif',
-  bmp: 'image/bmp'
+  bmp: 'image/bmp',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime'
 }
 
 // Must run before app 'ready' - registers the scheme itself as privileged
 // (fetchable, CSP-friendly) so protocol.handle can serve real responses for it below.
+// `stream: true` is required for <video>/<audio> to work at all on a custom scheme -
+// without it Chromium expects a fully-buffered response and silently delivers
+// nothing to the media element (no network error, just a black/unplayable player);
+// <img> works either way, which is why only video was ever affected.
 protocol.registerSchemesAsPrivileged([
-  { scheme: MEDIA_PROTOCOL, privileges: { standard: true, secure: true, supportFetchAPI: true } }
+  {
+    scheme: MEDIA_PROTOCOL,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+  }
 ])
 
 // Chromium doesn't request server-side decorations on native Wayland by default,
@@ -125,12 +135,18 @@ app.whenReady().then(() => {
 
   setInterval(requestReconcile, RECONCILE_INTERVAL_MS).unref()
 
-  // Serves note-attached images straight out of <graphPath>/images - reads the graph
+  // Serves note-attached media (an image or video) straight out of <graphPath>/images - reads the graph
   // path fresh on every request (rather than capturing it once) since it can change
   // at runtime via pickDirectory/setGraphPath. The filename rides in the URL path,
   // not the authority: image files inherit their note's filename stem, which is
   // routinely not a valid URL host (leading `-`, spaces, uppercase, …). basename
   // also collapses any `../` traversal the path might carry.
+  //
+  // Fetches through net.fetch on a file:// URL (rather than fs.readFile + a plain
+  // 200 Response) so the Range header a <video> element sends is honored with a
+  // real 206 Partial Content response - a manual full-body read breaks video
+  // seeking, and some Chromium versions refuse to play the source at all without
+  // it (see https://github.com/electron/electron/issues/38749).
   protocol.handle(MEDIA_PROTOCOL, async (request) => {
     const filename = basename(decodeURIComponent(new URL(request.url).pathname))
     const extension = filename.split('.').pop()?.toLowerCase() ?? ''
@@ -145,10 +161,17 @@ app.whenReady().then(() => {
       return new Response(null, { status: 404 })
     }
 
+    const fileUrl = pathToFileURL(join(graphPath, 'images', filename)).toString()
     try {
-      const data = await readFile(join(graphPath, 'images', filename))
-      return new Response(data, { headers: { 'content-type': mimeType } })
-    } catch {
+      const response = await net.fetch(fileUrl, { headers: request.headers })
+      if (!response.ok && response.status !== 206) {
+        console.warn(`Media fetch for "${fileUrl}" returned ${response.status}.`)
+      }
+      const headers = new Headers(response.headers)
+      headers.set('content-type', mimeType)
+      return new Response(response.body, { status: response.status, headers })
+    } catch (error) {
+      console.warn(`Media fetch for "${fileUrl}" threw:`, error)
       return new Response(null, { status: 404 })
     }
   })

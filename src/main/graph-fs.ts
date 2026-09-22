@@ -3,19 +3,16 @@
  * the filesystem watcher (GraphWatcher) so the two agree on exactly which files
  * on disk are part of the graph.
  */
+import {
+  SUPPORTED_IMAGE_EXTENSIONS,
+  SUPPORTED_MEDIA_EXTENSIONS,
+  SUPPORTED_VIDEO_EXTENSIONS
+} from '../shared/media'
 
-/** Subdirectory of the graph folder that holds note-attached image files. */
+/** Subdirectory of the graph folder that holds note-attached media files (an image or a short video). */
 export const IMAGES_DIR_NAME = 'images'
 
-/** Recognised image file extensions, lowercase and without the leading dot. */
-export const SUPPORTED_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
-  'jpg',
-  'jpeg',
-  'png',
-  'gif',
-  'webp',
-  'bmp'
-])
+export { SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_VIDEO_EXTENSIONS, SUPPORTED_MEDIA_EXTENSIONS }
 
-/** basename-without-extension of an image file: `<noteStem>-<epochMillis>`. */
+/** basename-without-extension of a media file: `<noteStem>-<epochMillis>`. */
 export const IMAGE_STEM_PATTERN = /^(.+)-(\d+)$/

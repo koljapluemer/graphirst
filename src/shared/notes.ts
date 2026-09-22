@@ -5,9 +5,9 @@ export interface RawNoteFile {
   rels?: NoteRelationTuple[]
   /**
    * Long-form content for this note. Shared verbatim with the sibling `../note`
-   * app, which owns this key. An attached image is NOT referenced here - it is a
-   * loose file in the graph folder's `images/` subdirectory, matched to this note
-   * by filename stem (see NoteStore.imagesByStem).
+   * app, which owns this key. An attached image or video is NOT referenced here -
+   * it is a loose file in the graph folder's `images/` subdirectory, matched to
+   * this note by filename stem (see NoteStore.imagesByStem).
    */
   extra?: string
   /** Freeform comments/to-dos attached to this note, rendered on the node itself. */
@@ -34,7 +34,7 @@ export interface IndexedNote {
   bodyCompact: string
   rels: NoteLink[]
   degree: number
-  /** Filename (inside the graph folder's `images/` subdirectory) of the image matched to this note by stem, or null. */
+  /** Filename (inside the graph folder's `images/` subdirectory) of the image or video matched to this note by stem, or null. */
   image: string | null
   extraContent: string
   /** Whitespace-compacted extra content, the extra-content counterpart to bodyCompact (search now scans this too). */
@@ -195,19 +195,19 @@ export interface UpdateNoteRequest {
 }
 
 export interface AttachImageRequest {
-  /** The note the image is being attached to (its .json filename). */
+  /** The note the media is being attached to (its .json filename). */
   filename: string
-  /** A data: URL, e.g. "data:image/webp;base64,...". */
+  /** A data: URL, e.g. "data:image/webp;base64,..." or "data:video/mp4;base64,...". */
   dataUrl: string
 }
 
 export interface AttachImageResponse {
-  /** Filename the image was written under inside the graph folder's images/ subdirectory. */
+  /** Filename the media was written under inside the graph folder's images/ subdirectory. */
   image: string
 }
 
 export interface ClearImageRequest {
-  /** The note whose attached image should be removed (its .json filename). */
+  /** The note whose attached media should be removed (its .json filename). */
   filename: string
 }
 

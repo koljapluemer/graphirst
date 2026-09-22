@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { isAbsolute, relative, sep } from 'node:path'
 import { watch, type ChokidarOptions, type FSWatcher } from 'chokidar'
-import { IMAGES_DIR_NAME, SUPPORTED_IMAGE_EXTENSIONS } from './graph-fs'
+import { IMAGES_DIR_NAME, SUPPORTED_MEDIA_EXTENSIONS } from './graph-fs'
 
 /** Trailing debounce: how long the buffer waits for the next event before flushing. */
 const DEFAULT_DEBOUNCE_MS = 150
@@ -275,7 +275,7 @@ function classify(graphPath: string, absPath: string): Classification {
     }
     const dot = name.lastIndexOf('.')
     const extension = dot >= 0 ? name.slice(dot + 1).toLowerCase() : ''
-    if (!SUPPORTED_IMAGE_EXTENSIONS.has(extension)) {
+    if (!SUPPORTED_MEDIA_EXTENSIONS.has(extension)) {
       return null
     }
     return { kind: 'image', name }

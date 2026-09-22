@@ -367,9 +367,9 @@ export async function getLayoutedGraph(
   return { nodes: separateOverlaps(layoutedNodes, pinned) }
 }
 
-// First-paint height allowance for a card with an attached image. NoteCard
-// renders the image unconstrained (h-auto w-full), so this is a rough guess for
-// the initial estimate only - the measured-height layout pass corrects the
+// First-paint height allowance for a card with an attached image or video.
+// NoteCard renders it unconstrained (h-auto w-full), so this is a rough guess
+// for the initial estimate only - the measured-height layout pass corrects the
 // spacing once the real card exists.
 const IMAGE_HEIGHT_ESTIMATE = 176
 

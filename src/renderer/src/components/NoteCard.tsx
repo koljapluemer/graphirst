@@ -3,8 +3,10 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExtraContentModal from './ExtraContentModal'
+import MediaPreview from './MediaPreview'
 import PinControl from './PinControl'
 import { mediaUrl } from '../lib/media'
+import { isVideoFilename } from '../../../shared/media'
 import type { GraphNodePayload } from '../../../shared/notes'
 
 export default function NoteCard({
@@ -120,7 +122,11 @@ export default function NoteCard({
       {error ? <p className="mb-2 text-xs text-error">{error}</p> : null}
 
       {note.image ? (
-        <img src={mediaUrl(note.image)} alt="" className="mb-3 h-auto w-full " />
+        <MediaPreview
+          src={mediaUrl(note.image)}
+          kind={isVideoFilename(note.image) ? 'video' : 'image'}
+          className="mb-3 h-auto w-full"
+        />
       ) : null}
 
       <div

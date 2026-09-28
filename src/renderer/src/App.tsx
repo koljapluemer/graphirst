@@ -25,6 +25,7 @@ function App(): React.JSX.Element {
     pinNotes,
     unpinNote,
     setPinDepth,
+    pinAtLeast,
     clearPins,
     refetch
   } = useNoteGraph()
@@ -227,6 +228,7 @@ function App(): React.JSX.Element {
               onPinNote={pinNote}
               onUnpinNote={unpinNote}
               onSetPinDepth={setPinDepth}
+              onPinAtLeast={pinAtLeast}
               onClearPins={clearPins}
               onPinRandomOrphan={() => void handlePinRandomOrphan()}
               pinRandomOrphanBusy={orphanBusy}

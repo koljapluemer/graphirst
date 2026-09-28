@@ -19,6 +19,7 @@ import { useGraphToolbarGroups } from './graph-toolbar/useGraphToolbarGroups'
 import { useElkLayout } from '../hooks/useElkLayout'
 import { useGraphInteraction } from '../hooks/useGraphInteraction'
 import { useGraphNodes } from '../hooks/useGraphNodes'
+import { useFitViewOnReframe } from '../hooks/useFitViewOnReframe'
 import type { NoteGraph } from '../../../shared/notes'
 
 const edgeTypes = { floating: FloatingEdge, pendingConnection: PendingConnectionEdge }
@@ -34,6 +35,7 @@ interface GraphCanvasProps {
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
+  onPinAtLeast: (filename: string, depth: number) => void
   onClearPins: () => void
   onPinRandomOrphan: () => void
   pinRandomOrphanBusy: boolean
@@ -52,6 +54,7 @@ interface FlowSceneProps {
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
+  onPinAtLeast: (filename: string, depth: number) => void
   onClearPins: () => void
   onPinRandomOrphan: () => void
   pinRandomOrphanBusy: boolean
@@ -76,6 +79,7 @@ function FlowScene({
   onPinNote,
   onUnpinNote,
   onSetPinDepth,
+  onPinAtLeast,
   onClearPins,
   onPinRandomOrphan,
   pinRandomOrphanBusy,
@@ -89,30 +93,22 @@ function FlowScene({
   const [interaction, setInteraction] = useState<Interaction>(IDLE_INTERACTION)
 
   // Drag lifecycle, owned here so the layout and node hooks stay in step.
-  // `dragging` pauses the node-view sync and both ELK passes; `isDraggingRef` is
-  // the same flag for the layout hook's async guards. On drop, useGraphNodes
+  // `dragging` pauses the node-view sync and the layout. On drop, useGraphNodes
   // patches the layout via `applyManualDrop` - no ELK re-run.
   const manualPositionsRef = useRef<Map<string, XYPosition>>(new Map())
-  const isDraggingRef = useRef(false)
   const [dragging, setDragging] = useState(false)
 
-  const beginDrag = useCallback(() => {
-    isDraggingRef.current = true
-    setDragging(true)
-  }, [])
-  const endDrag = useCallback(() => {
-    isDraggingRef.current = false
-    setDragging(false)
-  }, [])
+  const beginDrag = useCallback(() => setDragging(true), [])
+  const endDrag = useCallback(() => setDragging(false), [])
 
-  const { layouted, anchorFilename, markInteraction, applyManualDrop } = useElkLayout({
+  const { committed, anchorFilename, markInteraction, applyManualDrop } = useElkLayout({
     graph,
     pins,
-    interactionType: interaction.type,
+    frozenFilename: interaction.type === 'edit' ? interaction.filename : null,
     manualPositionsRef,
-    dragging,
-    isDraggingRef
+    dragging
   })
+  useFitViewOnReframe(committed)
 
   const {
     callbacks,
@@ -127,16 +123,16 @@ function FlowScene({
     performUndo
   } = useGraphInteraction({
     setInteraction,
-    pins,
     onPinNote,
     onUnpinNote,
     onSetPinDepth,
+    onPinAtLeast,
     markInteraction
   })
 
   const { nodes, edges, onNodesChange, onNodeDragStart, onNodeDragStop } = useGraphNodes({
     graph,
-    layouted,
+    layout: committed.layout,
     pins,
     interaction,
     anchorFilename,
@@ -164,7 +160,6 @@ function FlowScene({
 
   return (
     <ReactFlow
-      fitView
       colorMode={colorMode}
       className={`${dragging ? FOLLOWERS_STOP_GLIDING_CLASS_NAME : ''} [&_.react-flow__renderer]:cursor-grab [&_.react-flow__renderer:active]:cursor-grabbing [&_.react-flow__viewport]:cursor-grab [&_.react-flow__viewport:active]:cursor-grabbing`}
       nodeOrigin={[0.5, 0.5]}
@@ -246,6 +241,7 @@ export default function GraphCanvas({
   onPinNote,
   onUnpinNote,
   onSetPinDepth,
+  onPinAtLeast,
   onClearPins,
   onPinRandomOrphan,
   pinRandomOrphanBusy,
@@ -277,6 +273,7 @@ export default function GraphCanvas({
           onPinNote={onPinNote}
           onUnpinNote={onUnpinNote}
           onSetPinDepth={onSetPinDepth}
+          onPinAtLeast={onPinAtLeast}
           onClearPins={onClearPins}
           onPinRandomOrphan={onPinRandomOrphan}
           pinRandomOrphanBusy={pinRandomOrphanBusy}

@@ -22,7 +22,7 @@ import {
   type DraftInteraction,
   type Interaction
 } from '../components/graph-interaction'
-import { EXPAND_PIN_DEPTH, needsExpansion } from '../components/graph-hidden-relations'
+import { EXPAND_PIN_DEPTH } from '../components/graph-hidden-relations'
 import type { ViewCallbacks } from '../components/graph-view-model'
 import { useUndoToast, type UndoAction } from './useUndoToast'
 import { CREATED_NOTE_PIN_DEPTH, MANUAL_PIN_DEPTH, SEARCH_RESULT_PIN_DEPTH } from './useNoteGraph'
@@ -32,10 +32,10 @@ const selectDomNode = (state: ReactFlowState): HTMLDivElement | null => state.do
 
 export interface UseGraphInteractionParams {
   setInteraction: Dispatch<SetStateAction<Interaction>>
-  pins: ReadonlyMap<string, number>
   onPinNote: (filename: string, depth: number) => void
   onUnpinNote: (filename: string) => void
   onSetPinDepth: (filename: string, depth: number) => void
+  onPinAtLeast: (filename: string, depth: number) => void
   /** From useElkLayout - promotes the acted-on note to the next layout anchor. */
   markInteraction: (filename: string) => void
 }
@@ -62,10 +62,10 @@ export interface UseGraphInteractionResult {
  */
 export function useGraphInteraction({
   setInteraction,
-  pins,
   onPinNote,
   onUnpinNote,
   onSetPinDepth,
+  onPinAtLeast,
   markInteraction
 }: UseGraphInteractionParams): UseGraphInteractionResult {
   const { screenToFlowPosition } = useReactFlow()
@@ -188,8 +188,7 @@ export function useGraphInteraction({
   )
 
   const handleDeleteNote = useCallback(
-    async (filename: string): Promise<void> => {
-      const priorDepth = pins.get(filename) ?? null
+    async (filename: string, priorDepth: number | null): Promise<void> => {
       await window.api.notes.deleteNote({ filename })
       onUnpinNote(filename)
       showUndo('Note deleted.', async () => {
@@ -199,7 +198,7 @@ export function useGraphInteraction({
         }
       })
     },
-    [onUnpinNote, onPinNote, pins, showUndo]
+    [onUnpinNote, onPinNote, showUndo]
   )
 
   const handleStartEdit = useCallback(
@@ -285,24 +284,17 @@ export function useGraphInteraction({
   )
 
   // A hidden-relations badge was clicked: pin its note deep enough that its direct
-  // relations render. Guarded on the same rule the badge disables itself with, so
-  // a stray second click while the new graph is still loading is a no-op instead
-  // of a redundant refetch. The note also becomes the layout anchor, so the
-  // notes that appear are seeded next to it rather than next to an older anchor.
+  // relations render. `onPinAtLeast` leaves the pins untouched when the note is
+  // already that deep, so a stray second click while the new graph is still
+  // loading is a no-op instead of a redundant refetch. The note also becomes the
+  // layout anchor, so the notes that appear are seeded next to it rather than
+  // next to an older anchor.
   const handleExpandHiddenRelations = useCallback(
     (filename: string) => {
-      const pinDepth = pins.get(filename) ?? null
-      if (!needsExpansion(pinDepth)) {
-        return
-      }
       markInteraction(filename)
-      if (pinDepth === null) {
-        onPinNote(filename, EXPAND_PIN_DEPTH)
-      } else {
-        onSetPinDepth(filename, EXPAND_PIN_DEPTH)
-      }
+      onPinAtLeast(filename, EXPAND_PIN_DEPTH)
     },
-    [pins, markInteraction, onPinNote, onSetPinDepth]
+    [markInteraction, onPinAtLeast]
   )
 
   // Left open after picking a result (see PaneSearchMenu) rather than resetting

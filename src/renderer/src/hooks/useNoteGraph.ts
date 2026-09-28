@@ -1,4 +1,5 @@
 import { startTransition, useCallback, useEffect, useRef, useState } from 'react'
+import { replaceEqualDeep } from '../lib/replace-equal-deep'
 import type { NoteGraph, PinSpec } from '../../../shared/notes'
 
 export const MANUAL_PIN_DEPTH = 1
@@ -19,6 +20,8 @@ export interface UseNoteGraphResult {
   pinNotes: (filenames: readonly string[], depth: number) => void
   unpinNote: (filename: string) => void
   setPinDepth: (filename: string, depth: number) => void
+  /** Pins `filename` at `depth` unless it is already pinned at least that deep. */
+  pinAtLeast: (filename: string, depth: number) => void
   clearPins: () => void
   /** `background: true` refreshes the graph without showing the loading overlay - for silent "notes changed on disk" refetches. */
   refetch: (opts?: { background?: boolean }) => void
@@ -68,8 +71,11 @@ export function useNoteGraph(): UseNoteGraphResult {
         if (ignore || requestId !== requestIdRef.current) {
           return
         }
+        // Structural sharing: unchanged notes/relations keep their identity, and
+        // a refetch that changed nothing keeps the whole graph - so everything
+        // downstream (layout, node view, memoized cards) sees only real changes.
         startTransition(() => {
-          setGraph(response.graph)
+          setGraph((prev) => (prev ? replaceEqualDeep(prev, response.graph) : response.graph))
         })
         setError(null)
       } catch (err) {
@@ -125,6 +131,13 @@ export function useNoteGraph(): UseNoteGraphResult {
     setPins((prev) => (prev.has(filename) ? new Map(prev).set(filename, clamped) : prev))
   }, [])
 
+  const pinAtLeast = useCallback((filename: string, depth: number) => {
+    setPins((prev) => {
+      const current = prev.get(filename)
+      return current !== undefined && current >= depth ? prev : new Map(prev).set(filename, depth)
+    })
+  }, [])
+
   const clearPins = useCallback(() => setPins(new Map()), [])
   const refetch = useCallback((opts?: { background?: boolean }) => {
     backgroundRef.current = opts?.background ?? false
@@ -140,6 +153,7 @@ export function useNoteGraph(): UseNoteGraphResult {
     pinNotes,
     unpinNote,
     setPinDepth,
+    pinAtLeast,
     clearPins,
     refetch
   }

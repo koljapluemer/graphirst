@@ -1,7 +1,8 @@
 import type { Edge } from '@xyflow/react'
 import type { HiddenRelationsFlowNode } from './HiddenRelationsNode'
 import { FOLLOWER_NODE_CLASS_NAME, NODE_CLASS_NAME } from './graph-node-style'
-import { HIDDEN_BADGE_GAP, type LayoutedGraph } from '../lib/graph-layout'
+import { HIDDEN_BADGE_GAP, type GraphLayout } from '../lib/graph-layout'
+import type { NoteGraph } from '../../../shared/notes'
 
 /**
  * Pin depth at which a note's direct relations are all rendered. What a click on a
@@ -28,9 +29,9 @@ export interface HiddenRelationsView {
 }
 
 /**
- * Decorates every note that has related notes off the canvas with a small badge
- * hanging below it, joined by an unlabeled edge. Derived purely from the layout
- * and pin state - none of it is part of the backend graph, and none of it goes
+ * Decorates every placed note that has related notes off the canvas with a small
+ * badge hanging below it, joined by an unlabeled edge. Derived purely from the
+ * graph, layout and pin state - none of it is part of the backend graph, and none of it goes
  * through ELK (the wider NODE_GAP leaves the room instead).
  *
  * Each badge is a React Flow *child* of its note (`parentId`), so it follows the
@@ -45,16 +46,17 @@ export interface HiddenRelationsView {
  * layout (and so the slot height used here) is suspended.
  */
 export function buildHiddenRelations(
-  layouted: LayoutedGraph,
+  graph: NoteGraph,
+  layout: GraphLayout,
   pins: ReadonlyMap<string, number>,
   editingFilename: string | null,
   onExpand: (filename: string) => void
 ): HiddenRelationsView {
   const view: HiddenRelationsView = { nodes: [], edges: [] }
 
-  for (const item of layouted.nodes) {
-    const { filename, hiddenNeighbors } = item.note
-    if (hiddenNeighbors === 0 || filename === editingFilename) {
+  for (const { filename, hiddenNeighbors } of graph.nodes) {
+    const slot = layout.slots.get(filename)
+    if (!slot || hiddenNeighbors === 0 || filename === editingFilename) {
       continue
     }
 
@@ -64,7 +66,7 @@ export function buildHiddenRelations(
       type: 'hiddenRelations',
       parentId: filename,
       origin: [0.5, 0],
-      position: { x: item.width / 2, y: item.height + HIDDEN_BADGE_GAP },
+      position: { x: slot.width / 2, y: slot.height + HIDDEN_BADGE_GAP },
       className: `${NODE_CLASS_NAME} ${FOLLOWER_NODE_CLASS_NAME}`,
       draggable: false,
       selectable: false,

@@ -7,19 +7,22 @@ import {
 } from '@xyflow/react'
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import type { GraphFlowNode } from '../components/graph-flow-node'
-import type { NoteFlowNode } from '../components/NoteNode'
-import type { HiddenRelationsFlowNode } from '../components/HiddenRelationsNode'
 import { DRAFT_ID_PREFIX, type Interaction } from '../components/graph-interaction'
 import { buildView, type ViewCallbacks } from '../components/graph-view-model'
-import type { LayoutedGraph } from '../lib/graph-layout'
+import type { GraphLayout } from '../lib/graph-layout'
+import { replaceEqualDeep } from '../lib/replace-equal-deep'
 import type { NoteGraph } from '../../../shared/notes'
 
-const EMPTY_NODES: GraphFlowNode[] = []
-const EMPTY_EDGES: Edge[] = []
+interface GraphView {
+  nodes: GraphFlowNode[]
+  edges: Edge[]
+}
+
+const EMPTY_VIEW: GraphView = { nodes: [], edges: [] }
 
 export interface UseGraphNodesParams {
   graph: NoteGraph
-  layouted: LayoutedGraph
+  layout: GraphLayout
   pins: ReadonlyMap<string, number>
   interaction: Interaction
   anchorFilename: string | null
@@ -47,15 +50,16 @@ export interface UseGraphNodesResult {
  *
  * React Flow owns `nodes` via `useNodesState`, so a drag mutates only the dragged
  * node in place - no per-frame rebuild of the whole array. A `useEffect`
- * re-derives the view and reconciles it into that state whenever a layout / graph
- * / pin / interaction input changes (never during a drag), preserving object
- * identity for untouched nodes so their measured size and edges don't churn. This
- * is React Flow's recommended shape for a flow whose nodes also come from
- * external data (see reactflow.dev/api-reference/hooks/use-nodes-state).
+ * re-derives the view whenever a layout / graph / pin / interaction input changes
+ * (never during a drag). The view is structurally shared with the previous one,
+ * so only nodes whose view actually changed are handed to React Flow as new
+ * objects - everything else keeps its identity, its measured size and its
+ * memoized render. This is React Flow's recommended shape for a flow whose nodes
+ * also come from external data (see reactflow.dev/api-reference/hooks/use-nodes-state).
  */
 export function useGraphNodes({
   graph,
-  layouted,
+  layout,
   pins,
   interaction,
   anchorFilename,
@@ -66,30 +70,33 @@ export function useGraphNodes({
   onDragStop,
   onManualDrop
 }: UseGraphNodesParams): UseGraphNodesResult {
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(EMPTY_NODES)
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>([])
   // Edges are plain state: they carry no interaction changes we round-trip
   // (labels are edited straight through the IPC bridge), so no `onEdgesChange`.
-  const [edges, setEdges] = useState<Edge[]>(EMPTY_EDGES)
-
-  const lastGraphRef = useRef<NoteGraph | null>(null)
-  const lastCallbacksRef = useRef<ViewCallbacks | null>(null)
+  const [edges, setEdges] = useState<Edge[]>(EMPTY_VIEW.edges)
+  const lastViewRef = useRef<GraphView>(EMPTY_VIEW)
 
   // Sync the derived view into React Flow's node/edge state. Suspended during a
-  // drag; `onManualDrop` has already patched `layouted` with the dropped position
+  // drag; `onManualDrop` has already patched the layout with the dropped position
   // by the time this re-runs on drag-end, so the released card doesn't snap back.
   useEffect(() => {
-    const reuseIdentity = lastGraphRef.current === graph && lastCallbacksRef.current === callbacks
-    lastGraphRef.current = graph
-    lastCallbacksRef.current = callbacks
-
     if (dragging) {
       return
     }
 
-    const view = buildView(graph, layouted, pins, interaction, anchorFilename, callbacks)
-    setNodes((current) => reconcileNodes(current, view.nodes, reuseIdentity))
-    setEdges((current) => reconcileEdges(current, view.edges, reuseIdentity))
-  }, [graph, layouted, pins, interaction, anchorFilename, callbacks, dragging, setNodes])
+    const previous = lastViewRef.current
+    const view = replaceEqualDeep(
+      previous,
+      buildView(graph, layout, pins, interaction, anchorFilename, callbacks)
+    )
+    if (view === previous) {
+      return
+    }
+    lastViewRef.current = view
+
+    setNodes((current) => syncNodes(current, previous.nodes, view.nodes))
+    setEdges(view.edges)
+  }, [graph, layout, pins, interaction, anchorFilename, callbacks, dragging, setNodes])
 
   // A dragged position lives only while the note is on the canvas - forget it
   // once the note leaves the graph, so a re-pinned note returns to a freshly
@@ -111,7 +118,7 @@ export function useGraphNodes({
     (_event, node) => {
       if (node.type === 'note' && !node.id.startsWith(DRAFT_ID_PREFIX)) {
         // Whole pixels: a card on a sub-pixel x re-measures its height and
-        // retriggers the layout pass (see separateOverlaps).
+        // retriggers the layout (see separateOverlaps).
         manualPositionsRef.current.set(node.id, {
           x: Math.round(node.position.x),
           y: Math.round(node.position.y)
@@ -129,89 +136,31 @@ export function useGraphNodes({
 }
 
 /**
- * Merges a freshly derived view into the current React Flow node array:
- *
- * When the graph and callbacks are unchanged, the previous node *object* is
- * reused for any node whose layout position and card data are unchanged (see
- * sameNode), so React Flow doesn't re-adopt it - re-adoption drops its measured
- * size and blinks its edges.
+ * Carries a new view into React Flow's node array. A view node identical to the
+ * previous view's keeps React Flow's current object (with its measured size and
+ * any in-flight state); a changed one replaces it immutably but keeps `measured`,
+ * so React Flow doesn't treat the node as unmeasured and re-adopt it from scratch.
  */
-function reconcileNodes(
+function syncNodes(
   current: GraphFlowNode[],
-  next: GraphFlowNode[],
-  reuseIdentity: boolean
+  previousView: GraphFlowNode[],
+  nextView: GraphFlowNode[]
 ): GraphFlowNode[] {
-  if (current.length === 0) {
-    return next
-  }
+  const currentById = new Map(current.map((node) => [node.id, node]))
+  const previousViewById = new Map(previousView.map((node) => [node.id, node]))
 
-  const byId = new Map(current.map((node) => [node.id, node]))
-  let changed = current.length !== next.length
-  const merged = next.map((node) => {
-    const prev = byId.get(node.id)
-
-    if (prev && reuseIdentity && sameNode(prev, node)) {
-      return prev
+  const synced = nextView.map((viewNode) => {
+    const existing = currentById.get(viewNode.id)
+    if (!existing) {
+      return viewNode
     }
-    changed = true
-    return node
+    if (previousViewById.get(viewNode.id) === viewNode) {
+      return existing
+    }
+    return { ...viewNode, measured: existing.measured }
   })
 
-  return changed ? merged : current
-}
-
-/** Per-kind "nothing to re-adopt" rule; a kind with no rule is always rebuilt. */
-function sameNode(a: GraphFlowNode, b: GraphFlowNode): boolean {
-  if (a.type === 'note' && b.type === 'note') {
-    return sameNoteNode(a, b)
-  }
-  if (a.type === 'hiddenRelations' && b.type === 'hiddenRelations') {
-    return sameHiddenRelationsNode(a, b)
-  }
-  return false
-}
-
-function sameNoteNode(a: NoteFlowNode, b: NoteFlowNode): boolean {
-  // Only the plain 'note' kind is reused in place - draft/edit cards are
-  // transient and singular, so rebuilding them costs nothing.
-  if (a.data.kind !== 'note' || b.data.kind !== 'note') {
-    return false
-  }
-  return (
-    a.position.x === b.position.x &&
-    a.position.y === b.position.y &&
-    a.width === b.width &&
-    a.draggable === b.draggable &&
-    a.data.note === b.data.note &&
-    a.data.pinDepth === b.data.pinDepth &&
-    a.data.isAnchor === b.data.isAnchor
-  )
-}
-
-function sameHiddenRelationsNode(a: HiddenRelationsFlowNode, b: HiddenRelationsFlowNode): boolean {
-  return (
-    a.position.x === b.position.x &&
-    a.position.y === b.position.y &&
-    a.parentId === b.parentId &&
-    a.data.hiddenCount === b.data.hiddenCount &&
-    a.data.expandable === b.data.expandable
-  )
-}
-
-/**
- * Edges carry no measured state, so identity only needs preserving to spare the
- * FloatingEdge components a re-render on a no-op sync. Safe to keep the previous
- * array wholesale only when the graph is unchanged (same relations) and the id
- * list lines up.
- */
-function reconcileEdges(current: Edge[], next: Edge[], reuseIdentity: boolean): Edge[] {
-  if (!reuseIdentity || current.length !== next.length) {
-    return next
-  }
-  for (let i = 0; i < next.length; i += 1) {
-    if (current[i].id !== next[i].id) {
-      return next
-    }
-  }
-  return current
+  const unchanged =
+    synced.length === current.length && synced.every((node, index) => node === current[index])
+  return unchanged ? current : synced
 }

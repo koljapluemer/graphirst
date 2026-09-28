@@ -1,36 +1,52 @@
-import { useNodesInitialized, useReactFlow, useStore, type ReactFlowState } from '@xyflow/react'
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import type { XYPosition } from '@xyflow/react'
+import { useStore, type ReactFlowState, type XYPosition } from '@xyflow/react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
+  applyManualPositions,
   collectMeasuredHeights,
+  computeLayout,
   EMPTY_LAYOUT,
-  ESTIMATED_LAYOUT,
-  getLayoutedGraph,
-  layoutHeightsDrifted,
-  measuredHeightSignature,
-  separateOverlaps,
-  type LayoutedGraph,
-  type LayoutState
+  isLayoutCurrent,
+  layoutStructureKey,
+  resolveLayoutHeights,
+  samePositions,
+  type GraphLayout
 } from '../lib/graph-layout'
-import type { Interaction } from '../components/graph-interaction'
 import type { NoteGraph } from '../../../shared/notes'
 
-const selectMeasuredHeightSignature = (state: ReactFlowState): string =>
-  measuredHeightSignature(collectMeasuredHeights(state.nodeLookup.values()))
+const selectMeasuredHeights = (state: ReactFlowState): Map<string, number> =>
+  collectMeasuredHeights(state.nodeLookup.values())
+
+function sameHeights(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): boolean {
+  if (a.size !== b.size) {
+    return false
+  }
+  for (const [id, height] of a) {
+    if (b.get(id) !== height) {
+      return false
+    }
+  }
+  return true
+}
+
+/** A layout plus whether it moved notes enough that the viewport should reframe. */
+export interface LayoutCommit {
+  layout: GraphLayout
+  reframe: boolean
+}
 
 export interface UseElkLayoutParams {
   graph: NoteGraph
   pins: ReadonlyMap<string, number>
-  interactionType: Interaction['type']
+  /** The note being edited - its card grows as it is typed into, so its slot height is frozen meanwhile. */
+  frozenFilename: string | null
   /** Notes the user has dragged: pinned in the layout and the drop patch below. */
   manualPositionsRef: RefObject<Map<string, XYPosition>>
-  /** True for the duration of a node drag - layout passes are suspended so a drag never fights ELK. */
+  /** True for the duration of a node drag - layout is suspended so a drag never fights ELK. */
   dragging: boolean
-  isDraggingRef: RefObject<boolean>
 }
 
 export interface UseElkLayoutResult {
-  layouted: LayoutedGraph
+  committed: LayoutCommit
   /** The note new/disconnected nodes are seeded next to. Drives NoteCard's dashed border. */
   anchorFilename: string | null
   /** Records that a note was just pinned/created/acted-on, so it becomes the next layout anchor. */
@@ -44,58 +60,51 @@ export interface UseElkLayoutResult {
 }
 
 /**
- * Owns the two-pass ELK layout lifecycle:
+ * Owns the layout lifecycle: measure first, then lay out once.
  *
- *  1. Whenever the graph changes, lay it out from `estimateNodeHeight()` guesses.
- *  2. Once React Flow has measured every rendered card, re-lay-out from the real
- *     heights - but only if a card drifted far enough to move a neighbour.
- *
- * plus the "seed new nodes next to the note that was just acted on" anchoring, a
- * viewport fit once the layout is final, and `applyManualDrop` for the on-drop
- * separation. Both ELK passes are suspended while a node is being dragged
- * (`dragging`) so a manual move never races a relayout.
+ * A note without a slot is rendered invisibly (see buildView) so React Flow can
+ * measure it. ELK runs only once every note has a height, and only when the
+ * current layout does not already account for the graph's structure and those
+ * heights - so a content-only change (an `extra` edit, a timestamp) never moves
+ * anything. Plus the "seed new nodes next to the note that was just acted on"
+ * anchoring and `applyManualDrop` for the on-drop separation. Suspended while a
+ * node is being dragged.
  */
 export function useElkLayout({
   graph,
   pins,
-  interactionType,
+  frozenFilename,
   manualPositionsRef,
-  dragging,
-  isDraggingRef
+  dragging
 }: UseElkLayoutParams): UseElkLayoutResult {
-  const { fitView, getNodes } = useReactFlow()
-  const nodesInitialized = useNodesInitialized()
-  // Reactive signal: changes whenever any card's measured height changes, so the
-  // measured-height pass re-runs when a card grows (body edit, an image finishing
-  // load) and not on unrelated store updates like viewport pans.
-  const measuredSignature = useStore(selectMeasuredHeightSignature)
+  const allMeasuredHeights = useStore(selectMeasuredHeights, sameHeights)
+  const measuredHeights = useMemo(() => {
+    if (!frozenFilename || !allMeasuredHeights.has(frozenFilename)) {
+      return allMeasuredHeights
+    }
+    const withoutFrozen = new Map(allMeasuredHeights)
+    withoutFrozen.delete(frozenFilename)
+    return withoutFrozen
+  }, [allMeasuredHeights, frozenFilename])
+  const structure = useMemo(() => layoutStructureKey(graph), [graph])
 
-  const [layouted, setLayouted] = useState<LayoutedGraph>(EMPTY_LAYOUT)
-  const [layoutState, setLayoutState] = useState<LayoutState>(ESTIMATED_LAYOUT)
-  // Mirrors `layouted` outside state so a layout pass (and applyManualDrop) can
-  // read the latest positions without depending on `layouted` - which would
-  // re-trigger the passes.
-  const layoutedRef = useRef<LayoutedGraph>(EMPTY_LAYOUT)
-  // The graph the estimated pass last consumed. Lets its re-run on drag-end (the
-  // `dragging` dep) be a no-op unless the graph actually changed while the drag,
-  // and the layout with it, was suspended.
-  const laidOutGraphRef = useRef<NoteGraph | null>(null)
+  const [committed, setCommitted] = useState<LayoutCommit>({
+    layout: EMPTY_LAYOUT,
+    reframe: false
+  })
+  const { layout } = committed
 
-  // The note a brand-new, otherwise-unconnected node's position is seeded from -
-  // without this, a note pinned with no relation to anything on screen is laid
-  // out from scratch and fitView can zoom out past the point where either is
-  // actually visible.
-  const anchorRef = useRef<string | null>(null)
+  // The note new/disconnected nodes are seeded next to. The most recently
+  // acted-on note stays pending until it has a slot of its own, so a fresh pin
+  // never ends up seeded from itself. Promoted during render (React's "adjust
+  // state when a prop changes" pattern), not in an effect.
   const [anchorFilename, setAnchorFilename] = useState<string | null>(null)
-  // Most recently added/acted-on note - promoted to the real anchor once it has
-  // a resolved position, so a fresh pin never ends up seeded from itself.
   const [pendingAnchor, setPendingAnchor] = useState<string | null>(null)
-  const pendingAnchorRef = useRef<string | null>(null)
+  if (pendingAnchor && layout.slots.has(pendingAnchor)) {
+    setAnchorFilename(pendingAnchor)
+    setPendingAnchor(null)
+  }
   const previousPinsRef = useRef<ReadonlyMap<string, number>>(new Map())
-
-  useEffect(() => {
-    pendingAnchorRef.current = pendingAnchor
-  }, [pendingAnchor])
 
   const markInteraction = useCallback((filename: string) => {
     setPendingAnchor(filename)
@@ -111,162 +120,46 @@ export function useElkLayout({
   }, [pins, markInteraction])
 
   const applyManualDrop = useCallback(() => {
-    const manual = manualPositionsRef.current
-    const withDrops: LayoutedGraph = {
-      nodes: layoutedRef.current.nodes.map((item) => {
-        const dropped = manual.get(item.note.filename)
-        return dropped ? { ...item, position: dropped } : item
-      })
-    }
-    const next: LayoutedGraph = {
-      nodes: separateOverlaps(withDrops.nodes, new Set(manual.keys()))
-    }
-    layoutedRef.current = next
-    setLayouted(next)
+    setCommitted((current) => ({
+      layout: applyManualPositions(current.layout, manualPositionsRef.current),
+      reframe: false
+    }))
   }, [manualPositionsRef])
 
-  // Pass 1: estimated heights. Runs on every graph change; its `dragging` dep also
-  // fires it on drag-end, which the guard turns into a no-op unless the graph
-  // changed while the drag - and the layout - was suspended.
+  // The single layout pass. Re-runs on every input change, including its own
+  // commit - which `isLayoutCurrent` then turns into a no-op. An input change
+  // mid-run cancels the stale result.
   useEffect(() => {
-    if (dragging || graph === laidOutGraphRef.current) {
+    if (dragging) {
       return
     }
-    let cancelled = false
-
-    const runLayout = async (): Promise<void> => {
-      try {
-        const nextLayout = await getLayoutedGraph(
-          graph,
-          layoutedRef.current,
-          anchorRef.current,
-          manualPositionsRef.current
-        )
-        if (cancelled || isDraggingRef.current) {
-          return
-        }
-        layoutedRef.current = nextLayout
-        laidOutGraphRef.current = graph
-
-        const pending = pendingAnchorRef.current
-        if (pending && pending !== anchorRef.current) {
-          const resolved = nextLayout.nodes.some((item) => item.note.filename === pending)
-          if (resolved) {
-            anchorRef.current = pending
-            setAnchorFilename(pending)
-          }
-        }
-
-        setLayouted(nextLayout)
-        setLayoutState(ESTIMATED_LAYOUT)
-      } catch (error) {
-        // Never fail silently: an uncaught rejection here used to leave `layouted`
-        // frozen forever with no visible sign anything had gone wrong.
-        console.error('Failed to lay out graph:', error)
-      }
-    }
-
-    void runLayout()
-
-    return () => {
-      cancelled = true
-    }
-  }, [graph, dragging, manualPositionsRef, isDraggingRef])
-
-  // Pass 2: real measured heights. `layoutState` keeps this from looping - a pass
-  // records the height signature it consumed and this only fires again when that
-  // signature moves. Suppressed mid-interaction (an editing card grows as it is
-  // typed into and floats above its neighbours) and mid-drag.
-  useEffect(() => {
-    if (
-      dragging ||
-      interactionType !== 'idle' ||
-      !nodesInitialized ||
-      layouted.nodes.length === 0
-    ) {
-      return
-    }
-
-    const measuredHeights = collectMeasuredHeights(getNodes())
-    const everyNodeMeasured = layouted.nodes.every((item) =>
-      measuredHeights.has(item.note.filename)
-    )
-    if (!everyNodeMeasured) {
-      return
-    }
-
-    const signature = measuredHeightSignature(measuredHeights)
-    if (layoutState.phase === 'measured' && layoutState.fromHeights === signature) {
+    const heights = resolveLayoutHeights(graph, measuredHeights, layout)
+    if (!heights || isLayoutCurrent(layout, structure, heights)) {
       return
     }
 
     let cancelled = false
 
-    const settle = async (): Promise<void> => {
-      try {
-        const nextLayout = layoutHeightsDrifted(layouted, measuredHeights)
-          ? await getLayoutedGraph(
-              graph,
-              layoutedRef.current,
-              anchorRef.current,
-              manualPositionsRef.current,
-              measuredHeights
-            )
-          : null
-        if (cancelled || isDraggingRef.current) {
+    computeLayout(graph, heights, layout, anchorFilename, manualPositionsRef.current)
+      .then((next) => {
+        if (cancelled) {
           return
         }
-        if (nextLayout) {
-          layoutedRef.current = nextLayout
-          setLayouted(nextLayout)
-        }
-        setLayoutState({ phase: 'measured', fromHeights: signature })
-      } catch (error) {
-        console.error('Failed to re-lay out graph from measured heights:', error)
-      }
-    }
-
-    void settle()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    graph,
-    layouted,
-    layoutState,
-    dragging,
-    interactionType,
-    nodesInitialized,
-    measuredSignature,
-    getNodes,
-    manualPositionsRef,
-    isDraggingRef
-  ])
-
-  // Reframe once the layout is final (measured pass done), so fitView never
-  // frames the estimated layout and then jumps when the measured pass shifts it.
-  useEffect(() => {
-    if (layoutState.phase !== 'measured' || layouted.nodes.length === 0) {
-      return
-    }
-
-    let secondFrame = 0
-    const firstFrame = requestAnimationFrame(() => {
-      secondFrame = requestAnimationFrame(() => {
-        void fitView({
-          duration: 420,
-          maxZoom: 1.15,
-          padding: { top: 0.16, right: 0.2, bottom: 0.16, left: 0.2 }
+        setCommitted({
+          layout: next,
+          reframe: next.slots.size > 0 && !samePositions(layout, next)
         })
       })
-    })
+      .catch((error: unknown) => {
+        // Never fail silently: a rejection here would otherwise leave the layout
+        // frozen with no visible sign anything had gone wrong.
+        console.error('Failed to lay out graph:', error)
+      })
 
     return () => {
-      cancelAnimationFrame(firstFrame)
-      cancelAnimationFrame(secondFrame)
+      cancelled = true
     }
-  }, [fitView, layoutState, layouted.nodes.length])
+  }, [graph, structure, measuredHeights, layout, anchorFilename, dragging, manualPositionsRef])
 
-  return { layouted, anchorFilename, markInteraction, applyManualDrop }
+  return { committed, anchorFilename, markInteraction, applyManualDrop }
 }

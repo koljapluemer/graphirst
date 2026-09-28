@@ -10,3 +10,5 @@ Do not run dev servers. Do not drive the UI. Do not take screenshots. Do not wri
 Use tailwind+daisy, overwrite patterns with custom CSS and bespoke config ONLY when absolutely necessary.
 
 Do not write to git. Not branches, not commits, not pushes, not pulls. If git write commands need to be run, ask the user.
+
+Unironically plan spec implementation *cleanly*. Do not bolt stuff on top of legacy garbage that serves no point just because it's there.

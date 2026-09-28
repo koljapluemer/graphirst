@@ -1,5 +1,5 @@
 import { ExternalLink, FileText, GripVertical, Maximize2, Pencil, Trash2, X } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import ExtraContentModal from './ExtraContentModal'
@@ -10,7 +10,7 @@ import { mediaUrl } from '../lib/media'
 import { isVideoFilename } from '../../../shared/media'
 import type { GraphNodePayload } from '../../../shared/notes'
 
-export default function NoteCard({
+function NoteCard({
   note,
   pinDepth,
   isAnchor,
@@ -25,9 +25,9 @@ export default function NoteCard({
   note: GraphNodePayload
   pinDepth: number | null
   isAnchor: boolean
-  onDelete: (filename: string) => Promise<void>
+  onDelete: (filename: string, pinDepth: number | null) => Promise<void>
   onEdit: (filename: string) => void
-  onUpdateExtra: (filename: string, extraContent: string) => Promise<void>
+  onUpdateExtra: (filename: string, patch: { body: string; extraContent: string }) => Promise<void>
   onPin: (filename: string) => void
   onUnpin: (filename: string) => void
   onChangeDepth: (filename: string, nextDepth: number) => void
@@ -44,7 +44,7 @@ export default function NoteCard({
     setError(null)
 
     try {
-      await onDelete(note.filename)
+      await onDelete(note.filename, pinDepth)
     } catch (deleteError) {
       setError((deleteError as Error).message)
       setDeleting(false)
@@ -207,7 +207,7 @@ export default function NoteCard({
       {extraModalOpen ? (
         <ExtraContentModal
           value={note.extraContent}
-          onSave={(extraContent) => onUpdateExtra(note.filename, extraContent)}
+          onSave={(extraContent) => onUpdateExtra(note.filename, { body: note.body, extraContent })}
           onClose={() => setExtraModalOpen(false)}
         />
       ) : null}
@@ -221,3 +221,8 @@ export default function NoteCard({
     </article>
   )
 }
+
+// Memoized: every prop is either note data that keeps its identity while unchanged
+// (see useNoteGraph's structural sharing) or a stable callback, so a card whose
+// node merely moved skips re-rendering its markdown.
+export default memo(NoteCard)

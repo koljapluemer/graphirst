@@ -1,16 +1,15 @@
 import ELK, { type ElkExtendedEdge, type ElkNode } from 'elkjs/lib/elk.bundled.js'
 import type { XYPosition } from '@xyflow/react'
-import type { GraphNodePayload, NoteGraph } from '../../../shared/notes'
+import type { NoteGraph } from '../../../shared/notes'
 
 /**
- * The pure ELK layer: given a backend graph (plus optional measured heights and
- * user-dragged positions) it returns absolute positions for every note node.
+ * The pure ELK layer: given a backend graph, every note's measured height and the
+ * user-dragged positions, it returns a slot (centre position + size) per note.
  * No React, no side effects beyond the shared ELK worker instance - the layout
- * lifecycle (two passes, anchoring, viewport fitting) lives in `useElkLayout`.
+ * lifecycle (when to lay out, anchoring, drops) lives in `useElkLayout`.
  */
 
 export const NODE_WIDTH = 370
-export const NODE_MIN_HEIGHT = 220
 
 // A hidden-relations badge (see graph-hidden-relations) hangs below its card:
 // `HIDDEN_BADGE_GAP` clear of the card's bottom edge, then `HIDDEN_BADGE_HEIGHT`
@@ -26,7 +25,7 @@ const LAYER_GAP = 200
 // next note card. Deduced from the collapsed label pill's classes in
 // FloatingEdge.tsx (`text-xs font-bold px-2 py-0.5 border`), not measured from
 // the real DOM - see estimateEdgeLabelSize below for why a fixed guess is used
-// here instead of the node-height approach's measure-and-relayout pass.
+// here instead of the measure-then-layout approach used for card heights.
 const EDGE_LABEL_FONT_SIZE = 12 // text-xs
 const EDGE_LABEL_LINE_HEIGHT = 16 // text-xs line-height
 const EDGE_LABEL_AVG_CHAR_WIDTH = EDGE_LABEL_FONT_SIZE * 0.6 // rough glyph width, bold sans-serif
@@ -50,7 +49,7 @@ const ELK_LAYOUT_OPTIONS = {
   'elk.algorithm': 'layered',
   'elk.direction': 'RIGHT',
   'elk.edgeRouting': 'SPLINES',
-  // Interactive mode + seeding each node's previous position (see getLayoutedGraph)
+  // Interactive mode + seeding each node's previous position (see computeLayout)
   // biases crossing-minimization and placement toward the existing layout instead
   // of solving fresh each time, so unrelated nodes mostly stay put when the graph
   // changes.
@@ -61,52 +60,57 @@ const ELK_LAYOUT_OPTIONS = {
   'elk.spacing.nodeNode': `${NODE_GAP}`,
   'elk.layered.spacing.nodeNodeBetweenLayers': `${LAYER_GAP}`,
   // ELK's own default, set explicitly since it's what makes the `labels` entry
-  // below (see getLayoutedGraph) turn into a space-reserving dummy node between
+  // below (see computeLayout) turn into a space-reserving dummy node between
   // layers instead of being ignored.
   'elk.edgeLabels.placement': 'CENTER'
 } as const
 
 const elk = new ELK()
 
-export interface LayoutedNode {
-  note: GraphNodePayload
+/** Where a note sits (its centre) and the box ELK reserved for it. */
+export interface NodeSlot {
   position: XYPosition
   width: number
   height: number
 }
 
-export interface LayoutedGraph {
-  nodes: LayoutedNode[]
+export interface GraphLayout {
+  /** Every placed note's slot, by filename. A note without one is not laid out yet. */
+  slots: ReadonlyMap<string, NodeSlot>
+  /** `layoutStructureKey` of the graph these slots were computed for. */
+  structure: string
 }
 
-export const EMPTY_LAYOUT: LayoutedGraph = { nodes: [] }
-
 /**
- * Where the current `layouted` sits in the two-pass layout sequence:
- * - `estimated`: laid out from estimateNodeHeight() guesses, waiting for React
- *   Flow to measure the rendered cards.
- * - `measured`: laid out from real measured heights. `fromHeights` is the
- *   signature of the heights that pass consumed, so a re-measure only triggers
- *   another layout when a card's height has actually changed.
+ * Identity of everything about a graph's shape that ELK consumes: the note set
+ * and which notes are linked. Label text is not part of it - every edge label
+ * reserves the same fixed footprint (see estimateEdgeLabelSize).
  */
-export type LayoutState = { phase: 'estimated' } | { phase: 'measured'; fromHeights: string }
+export function layoutStructureKey(graph: Pick<NoteGraph, 'nodes' | 'edges'>): string {
+  const filenames = graph.nodes.map((note) => note.filename).sort()
+  const links = graph.edges.map((edge) => JSON.stringify([edge.source, edge.target])).sort()
+  return JSON.stringify([filenames, links])
+}
 
-export const ESTIMATED_LAYOUT: LayoutState = { phase: 'estimated' }
+export const EMPTY_LAYOUT: GraphLayout = {
+  slots: new Map(),
+  structure: layoutStructureKey({ nodes: [], edges: [] })
+}
 
 // Height delta (px) below which a measured card isn't worth re-laying-out for -
-// pairs with the integer rounding in collectMeasuredHeights.
+// pairs with the quantum in collectMeasuredHeights.
 const LAYOUT_HEIGHT_TOLERANCE = 8
 
 /** Minimal shape shared by React Flow's public `Node` and its `InternalNode`. */
 export type MeasuredNode = { id: string; type?: string; measured?: { height?: number } }
 
 // Quantum (px) the measured heights are snapped to. Coarse enough that sub-pixel
-// render jitter can't flip the height signature and retrigger the layout pass.
+// render jitter can't register as a height change and retrigger the layout.
 const MEASURED_HEIGHT_QUANTUM = 2
 
 /**
- * Per-`note`-node measured heights, keyed by filename (which is the node id).
- * Draft/edit cards are excluded - they are placed by hand, not by ELK.
+ * Per-`note`-node measured heights, keyed by id (the filename for real notes).
+ * Draft cards show up too, under their draft id - no graph note matches them.
  */
 export function collectMeasuredHeights(nodes: Iterable<MeasuredNode>): Map<string, number> {
   const heights = new Map<string, number>()
@@ -121,26 +125,76 @@ export function collectMeasuredHeights(nodes: Iterable<MeasuredNode>): Map<strin
   return heights
 }
 
-/** Order-independent string identity for a set of measured heights. */
-export function measuredHeightSignature(heights: ReadonlyMap<string, number>): string {
-  return [...heights]
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([id, height]) => `${id}:${height}`)
-    .join('|')
+/**
+ * The height to lay out every graph note with: its measured height, else the
+ * height its current slot was laid out with (a card whose live height is being
+ * ignored, e.g. while it is edited). Null while any note has neither - a new
+ * card React Flow has not measured yet.
+ */
+export function resolveLayoutHeights(
+  graph: NoteGraph,
+  measuredHeights: ReadonlyMap<string, number>,
+  layout: GraphLayout
+): Map<string, number> | null {
+  const heights = new Map<string, number>()
+  for (const note of graph.nodes) {
+    const height = measuredHeights.get(note.filename) ?? layout.slots.get(note.filename)?.height
+    if (height === undefined) {
+      return null
+    }
+    heights.set(note.filename, height)
+  }
+  return heights
+}
+
+/** Whether `layout` already accounts for this graph structure and these heights. */
+export function isLayoutCurrent(
+  layout: GraphLayout,
+  structure: string,
+  heights: ReadonlyMap<string, number>
+): boolean {
+  if (layout.structure !== structure) {
+    return false
+  }
+  for (const [filename, height] of heights) {
+    const slot = layout.slots.get(filename)
+    if (!slot || Math.abs(slot.height - height) > LAYOUT_HEIGHT_TOLERANCE) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Whether both layouts place the same notes at the same positions. */
+export function samePositions(a: GraphLayout, b: GraphLayout): boolean {
+  if (a.slots.size !== b.slots.size) {
+    return false
+  }
+  for (const [filename, slot] of a.slots) {
+    const other = b.slots.get(filename)
+    if (!other || other.position.x !== slot.position.x || other.position.y !== slot.position.y) {
+      return false
+    }
+  }
+  return true
 }
 
 /**
- * Whether any card's measured height is far enough from the height ELK reserved
- * for its slot to be worth re-running the layout.
+ * Where a note with no slot of its own starts out: next to the anchor (the note
+ * last acted on). Without this, a note pinned with no relation to anything on
+ * screen is laid out from scratch - it can land anywhere in the coordinate space,
+ * and fitView then has to zoom out to fit both, sometimes far enough that neither
+ * ends up actually on screen. Offset rather than the anchor's exact coordinate,
+ * so a fresh node isn't asked to sit directly on top of its anchor.
  */
-export function layoutHeightsDrifted(
-  layouted: LayoutedGraph,
-  measuredHeights: ReadonlyMap<string, number>
-): boolean {
-  return layouted.nodes.some((item) => {
-    const measured = measuredHeights.get(item.note.filename)
-    return measured !== undefined && Math.abs(measured - item.height) > LAYOUT_HEIGHT_TOLERANCE
-  })
+export function seedPosition(
+  layout: GraphLayout,
+  anchorFilename: string | null
+): XYPosition | undefined {
+  const anchor = anchorFilename ? layout.slots.get(anchorFilename) : undefined
+  return anchor
+    ? { x: anchor.position.x + NODE_WIDTH + LAYER_GAP, y: anchor.position.y }
+    : undefined
 }
 
 // Clearance (px) forced between two card rectangles by separateOverlaps. Just
@@ -154,31 +208,32 @@ const SEPARATION_ITERATIONS = 60
  * Nudges overlapping cards apart along their axis of least penetration, leaving
  * `pinned` nodes fixed (movable neighbours yield to them). ELK's `layered` won't
  * honour a dragged node's coordinate, so we pin it here and let this open space
- * around it; it also cleans up the residual overlaps ELK leaves from height
- * estimate drift or from a disconnected cluster seeded onto existing content.
+ * around it; it also cleans up the residual overlaps ELK leaves around a
+ * disconnected cluster seeded onto existing content.
  *
- * Pure: returns the same array when nothing overlaps.
+ * Pure: returns the same map when nothing overlaps.
  */
 export function separateOverlaps(
-  nodes: LayoutedNode[],
+  slots: ReadonlyMap<string, NodeSlot>,
   pinned: ReadonlySet<string>,
   margin = SEPARATION_MARGIN
-): LayoutedNode[] {
-  if (nodes.length < 2) {
-    return nodes
+): ReadonlyMap<string, NodeSlot> {
+  if (slots.size < 2) {
+    return slots
   }
 
-  const pos = nodes.map((node) => ({ x: node.position.x, y: node.position.y }))
-  const halfW = nodes.map((node) => node.width / 2 + margin / 2)
-  const halfH = nodes.map((node) => node.height / 2 + margin / 2)
-  const fixed = nodes.map((node) => pinned.has(node.note.filename))
+  const entries = [...slots]
+  const pos = entries.map(([, slot]) => ({ x: slot.position.x, y: slot.position.y }))
+  const halfW = entries.map(([, slot]) => slot.width / 2 + margin / 2)
+  const halfH = entries.map(([, slot]) => slot.height / 2 + margin / 2)
+  const fixed = entries.map(([filename]) => pinned.has(filename))
   let moved = false
 
   for (let iteration = 0; iteration < SEPARATION_ITERATIONS; iteration += 1) {
     let anyOverlap = false
 
-    for (let i = 0; i < nodes.length; i += 1) {
-      for (let j = i + 1; j < nodes.length; j += 1) {
+    for (let i = 0; i < entries.length; i += 1) {
+      for (let j = i + 1; j < entries.length; j += 1) {
         const dx = pos[j].x - pos[i].x
         const dy = pos[j].y - pos[i].y
         const penX = halfW[i] + halfW[j] - Math.abs(dx)
@@ -225,88 +280,72 @@ export function separateOverlaps(
   }
 
   if (!moved) {
-    return nodes
+    return slots
   }
   // Snap to whole pixels: fractional coordinates make cards render on sub-pixel
-  // boundaries, whose measured height jitters and retriggers the layout pass.
-  return nodes.map((node, i) => {
-    const x = Math.round(pos[i].x)
-    const y = Math.round(pos[i].y)
-    return x === node.position.x && y === node.position.y ? node : { ...node, position: { x, y } }
-  })
+  // boundaries, whose measured height jitters and retriggers the layout.
+  return new Map(
+    entries.map(([filename, slot], i) => {
+      const x = Math.round(pos[i].x)
+      const y = Math.round(pos[i].y)
+      const same = x === slot.position.x && y === slot.position.y
+      return [filename, same ? slot : { ...slot, position: { x, y } }]
+    })
+  )
 }
 
 /**
- * Runs ELK over the current graph and returns each note's absolute position.
+ * Puts every manually positioned note at its dragged spot and re-opens space
+ * around them - no ELK run. What a drop does, so the released card keeps its
+ * exact spot while its neighbours shift out of the way.
+ */
+export function applyManualPositions(
+  layout: GraphLayout,
+  manualPositions: ReadonlyMap<string, XYPosition>
+): GraphLayout {
+  const slots = new Map(layout.slots)
+  for (const [filename, position] of manualPositions) {
+    const slot = slots.get(filename)
+    if (slot) {
+      slots.set(filename, { ...slot, position })
+    }
+  }
+  return { ...layout, slots: separateOverlaps(slots, new Set(manualPositions.keys())) }
+}
+
+/**
+ * Runs ELK over the graph with every note's real height and returns its slots.
  *
- * - `previousLayout` seeds ELK's interactive mode so unrelated nodes stay put
- *   across graph changes.
+ * - `previous` seeds ELK's interactive mode so unrelated nodes stay put across
+ *   graph changes; a note without a previous slot is seeded next to the anchor.
  * - `manualPositions` (notes the user dragged) override ELK's coordinate for
  *   those notes and pin them through the final separateOverlaps pass, so a
  *   dragged card keeps its spot and its neighbours open space around it.
- * - `measuredHeights` is supplied on the second pass; the first pass falls back
- *   to estimateNodeHeight().
  */
-export async function getLayoutedGraph(
+export async function computeLayout(
   graph: NoteGraph,
-  previousLayout: LayoutedGraph,
+  heights: ReadonlyMap<string, number>,
+  previous: GraphLayout,
   anchorFilename: string | null,
-  manualPositions?: ReadonlyMap<string, XYPosition>,
-  measuredHeights?: ReadonlyMap<string, number>
-): Promise<LayoutedGraph> {
-  const nodeSizes = new Map(
-    graph.nodes.map((note) => [
-      note.filename,
-      {
-        width: NODE_WIDTH,
-        height: measuredHeights?.get(note.filename) ?? estimateNodeHeight(note)
-      }
-    ])
-  )
-
+  manualPositions: ReadonlyMap<string, XYPosition>
+): Promise<GraphLayout> {
   const knownFilenames = new Set(graph.nodes.map((note) => note.filename))
-
-  // Previous center positions, converted back to ELK's top-left convention, so
-  // ELK's interactive mode has something to anchor to instead of solving from
-  // a blank slate.
-  const previousPositions = new Map(
-    previousLayout.nodes.map((item) => [item.note.filename, item.position])
-  )
-
-  if (manualPositions) {
-    for (const [filename, position] of manualPositions) {
-      if (knownFilenames.has(filename)) {
-        previousPositions.set(filename, position)
-      }
-    }
-  }
-
-  // A note with no previous position of its own (freshly pinned, or newly
-  // discovered around a freshly pinned note) has nothing tying it to where the
-  // rest of the graph already lives. Seed it near the anchor instead of letting
-  // ELK place it from scratch - otherwise a disconnected new cluster can land
-  // anywhere in the coordinate space, and fitView then has to zoom out to fit
-  // both, sometimes far enough that neither ends up actually on screen.
-  const anchorSeed = anchorFilename ? previousPositions.get(anchorFilename) : undefined
-  // Offset rather than reuse the anchor's exact coordinate, so a fresh node isn't
-  // asking ELK to place it directly on top of the node it's anchored to.
-  const anchorPosition = anchorSeed
-    ? { x: anchorSeed.x + NODE_WIDTH + LAYER_GAP, y: anchorSeed.y }
-    : undefined
+  const heightOf = (filename: string): number => heights.get(filename) ?? 0
+  const seed = seedPosition(previous, anchorFilename)
 
   const elkGraph: ElkNode = {
     id: 'root',
     layoutOptions: ELK_LAYOUT_OPTIONS,
     children: graph.nodes.map((note) => {
-      const width = nodeSizes.get(note.filename)?.width ?? NODE_WIDTH
-      const height = nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
-      const previous = previousPositions.get(note.filename) ?? anchorPosition
+      const height = heightOf(note.filename)
+      // Seeds are centre positions, converted to ELK's top-left convention.
+      const start = previous.slots.get(note.filename)?.position ?? seed
 
       return {
         id: note.filename,
-        width,
+        width: NODE_WIDTH,
         height,
-        ...(previous ? { x: previous.x - width / 2, y: previous.y - height / 2 } : {})
+        ...(start ? { x: start.x - NODE_WIDTH / 2, y: start.y - height / 2 } : {})
       }
     }),
     // ELK throws if an edge references a node id not present in `children` above -
@@ -329,58 +368,38 @@ export async function getLayoutedGraph(
   }
 
   const layout = await elk.layout(elkGraph)
-  const children = layout.children ?? []
 
   // No single "center" to anchor to with multiple simultaneous pins - use ELK's raw
-  // coordinates directly. fitView (see useElkLayout) reframes the viewport after
-  // every layout anyway, so the absolute coordinate origin is never visible to the user.
-  const positions = new Map(
-    children.map((node) => [
-      node.id,
-      {
-        // Whole pixels only - see the snap note in separateOverlaps.
-        x: Math.round((node.x ?? 0) + (node.width ?? NODE_WIDTH) / 2),
-        y: Math.round((node.y ?? 0) + (node.height ?? NODE_MIN_HEIGHT) / 2)
-      }
-    ])
+  // coordinates directly; the viewport is reframed whenever positions change, so
+  // the absolute coordinate origin is never visible to the user.
+  const slots = new Map<string, NodeSlot>(
+    (layout.children ?? []).map((node) => {
+      const height = heightOf(node.id)
+      return [
+        node.id,
+        {
+          // Whole pixels only - see the snap note in separateOverlaps.
+          position: {
+            x: Math.round((node.x ?? 0) + NODE_WIDTH / 2),
+            y: Math.round((node.y ?? 0) + height / 2)
+          },
+          width: NODE_WIDTH,
+          height
+        }
+      ]
+    })
   )
 
   // `layered` ignores a seed coordinate for placement, so put dragged notes back
   // where the user left them and pin them through the separation pass below.
   const pinned = new Set<string>()
-  if (manualPositions) {
-    for (const [filename, position] of manualPositions) {
-      if (knownFilenames.has(filename)) {
-        positions.set(filename, position)
-        pinned.add(filename)
-      }
+  for (const [filename, position] of manualPositions) {
+    const slot = slots.get(filename)
+    if (slot) {
+      slots.set(filename, { ...slot, position })
+      pinned.add(filename)
     }
   }
 
-  const layoutedNodes: LayoutedNode[] = graph.nodes.map((note) => ({
-    note,
-    position: positions.get(note.filename) ?? { x: 0, y: 0 },
-    width: nodeSizes.get(note.filename)?.width ?? NODE_WIDTH,
-    height: nodeSizes.get(note.filename)?.height ?? NODE_MIN_HEIGHT
-  }))
-
-  return { nodes: separateOverlaps(layoutedNodes, pinned) }
-}
-
-// First-paint height allowance for a card with an attached image or video.
-// NoteCard renders it unconstrained (h-auto w-full), so this is a rough guess
-// for the initial estimate only - the measured-height layout pass corrects the
-// spacing once the real card exists.
-const IMAGE_HEIGHT_ESTIMATE = 176
-
-/**
- * Cheap per-note height guess for the *first* layout pass, before React Flow has
- * measured the real cards. Deliberately approximate - the measured-height pass
- * corrects ELK's spacing once the DOM exists.
- */
-function estimateNodeHeight(note: GraphNodePayload): number {
-  const lineCount = note.body.split('\n').length
-  const textWeight = Math.ceil(note.body.length / 110)
-  const imageHeight = note.image ? IMAGE_HEIGHT_ESTIMATE : 0
-  return Math.max(NODE_MIN_HEIGHT, 120 + Math.max(lineCount, textWeight) * 20 + imageHeight)
+  return { slots: separateOverlaps(slots, pinned), structure: layoutStructureKey(graph) }
 }

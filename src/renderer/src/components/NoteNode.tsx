@@ -12,9 +12,12 @@ export type NoteNodeData =
       pinDepth: number | null
       /** Whether this note is the current session's soft anchor for placing new notes. */
       isAnchor: boolean
-      onDelete: (filename: string) => Promise<void>
+      onDelete: (filename: string, pinDepth: number | null) => Promise<void>
       onEdit: (filename: string) => void
-      onUpdateExtra: (filename: string, extraContent: string) => Promise<void>
+      onUpdateExtra: (
+        filename: string,
+        patch: { body: string; extraContent: string }
+      ) => Promise<void>
       onPin: (filename: string) => void
       onUnpin: (filename: string) => void
       onChangeDepth: (filename: string, nextDepth: number) => void

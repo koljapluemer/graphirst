@@ -69,6 +69,7 @@ function runSearch(
   pattern: string,
   isRegex: boolean,
   flags: string,
+  fields: ('body' | 'extra')[],
   limit: number
 ): void {
   let re: RE2 | null = null
@@ -87,8 +88,16 @@ function runSearch(
 
   const matches: RawSearchMatch[] = []
   for (const entry of corpus) {
-    const bodyMatch = isRegex ? findRegex(entry.body, re!) : findLiteral(entry.body, lowerNeedle)
-    const extraMatch = isRegex ? findRegex(entry.extra, re!) : findLiteral(entry.extra, lowerNeedle)
+    const bodyMatch = fields.includes('body')
+      ? isRegex
+        ? findRegex(entry.body, re!)
+        : findLiteral(entry.body, lowerNeedle)
+      : null
+    const extraMatch = fields.includes('extra')
+      ? isRegex
+        ? findRegex(entry.extra, re!)
+        : findLiteral(entry.extra, lowerNeedle)
+      : null
 
     if (!bodyMatch && !extraMatch) {
       continue
@@ -123,7 +132,14 @@ parentPort?.on('message', (message: RawSearchWorkerRequest) => {
       removeEntries(message.filenames)
       return
     case 'search':
-      runSearch(message.requestId, message.pattern, message.isRegex, message.flags, message.limit)
+      runSearch(
+        message.requestId,
+        message.pattern,
+        message.isRegex,
+        message.flags,
+        message.fields,
+        message.limit
+      )
       return
   }
 })

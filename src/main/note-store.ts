@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { Document } from 'flexsearch'
+import { RE2 } from 're2-wasm'
 import { GraphWatcher, type GraphChangeBatch } from './graph-watcher'
 import {
   IMAGES_DIR_NAME,
@@ -16,6 +17,12 @@ import {
 import { MAX_VIDEO_ATTACHMENT_BYTES } from '../shared/media'
 import { selectRecentNotes } from './recent-notes'
 import { buildMatchDisplay, locateFuzzyMatch, type LocatedMatch } from './search-match-display'
+import {
+  IncompleteSearchQueryError,
+  parseSearchQuery,
+  type SearchField,
+  type SearchQueryNode
+} from './search-query'
 import { matchesOrphanFilter, orderByHeadScore } from './search-ordering'
 import type {
   AttachImageRequest,
@@ -110,6 +117,8 @@ interface SearchHit {
   filename: string
   note: IndexedNote
   rawMatch: RawSearchMatch | null
+  fuzzyQuery: FuzzyQuery | null
+  engineRank: number
 }
 
 /** `('image', 'jpeg')` -> `'jpg'`, `('video', 'quicktime')` -> `'mov'`; otherwise the subtype as-is. */
@@ -292,13 +301,11 @@ export class NoteStore extends EventEmitter {
 
     const hits = await this.orderedHits(request)
     const start = request.page * NOTE_LIST_PAGE_SIZE
-    const query = this.prepareFuzzyQuery(request.query.trim())
-
     return {
       graphPath: this.graphPath,
       results: hits
         .slice(start, start + NOTE_LIST_PAGE_SIZE)
-        .map((hit) => this.toSearchResult(hit, query)),
+        .map((hit) => this.toSearchResult(hit)),
       total: hits.length
     }
   }
@@ -323,79 +330,176 @@ export class NoteStore extends EventEmitter {
       return []
     }
 
-    const engineOrder =
-      criteria.mode === 'raw' ? await this.rawHits(trimmed) : this.fuzzyHits(trimmed)
+    let query: SearchQueryNode
+    try {
+      query = parseSearchQuery(trimmed)
+    } catch (error) {
+      if (error instanceof IncompleteSearchQueryError) return []
+      throw error
+    }
+
+    const engineOrder = await this.queryHits(query)
     const kept = engineOrder.filter((hit) => matchesOrphanFilter(hit.note, criteria.orphan))
-    const query = this.prepareFuzzyQuery(trimmed)
-    return orderByHeadScore(kept, (hit, engineRank) =>
+    return orderByHeadScore(kept, (hit) =>
       hit.rawMatch
-        ? this.scoreRawHit(hit.note, engineRank, hit.rawMatch)
-        : this.scoreFuzzyHit(hit.note, engineRank, query)
+        ? this.scoreRawHit(hit.note, hit.engineRank, hit.rawMatch)
+        : hit.fuzzyQuery
+          ? this.scoreFuzzyHit(hit.note, hit.engineRank, hit.fuzzyQuery)
+          : 1000 - hit.engineRank * 5 + Math.min(hit.note.degree, 24)
     )
   }
 
-  /** Every fuzzy match, in FlexSearch's relevance order. */
-  private fuzzyHits(trimmed: string): SearchHit[] {
-    const candidates: FuzzyCandidate[] = this.searchIndex.search(trimmed, {
+  /** Evaluates the parsed query with set operations while retaining each hit's best display match. */
+  private async queryHits(query: SearchQueryNode): Promise<SearchHit[]> {
+    const matches = await this.evaluateQuery(query, 'content')
+    return [...matches.values()]
+  }
+
+  private async evaluateQuery(
+    query: SearchQueryNode,
+    field: SearchField
+  ): Promise<Map<string, SearchHit>> {
+    if (query.type === 'scope') return this.evaluateQuery(query.child, query.field)
+    if (query.type === 'term') return this.termHits(query, field)
+    if (query.type === 'not') {
+      const excluded = await this.evaluateQuery(query.child, field)
+      const result = new Map<string, SearchHit>()
+      let rank = 0
+      for (const note of this.notes.values()) {
+        if (!excluded.has(note.filename)) {
+          result.set(note.filename, {
+            filename: note.filename,
+            note,
+            rawMatch: null,
+            fuzzyQuery: null,
+            engineRank: rank++
+          })
+        }
+      }
+      return result
+    }
+
+    const parts = await Promise.all(query.children.map((child) => this.evaluateQuery(child, field)))
+    if (query.type === 'or') {
+      const result = new Map<string, SearchHit>()
+      for (const part of parts) {
+        for (const [filename, hit] of part) {
+          const current = result.get(filename)
+          if (!current || hit.engineRank < current.engineRank || !this.hasDisplayMatch(current)) {
+            result.set(filename, hit)
+          }
+        }
+      }
+      return result
+    }
+
+    const [first, ...rest] = parts
+    const result = new Map(first)
+    for (const part of rest) {
+      for (const [filename, current] of result) {
+        const other = part.get(filename)
+        if (!other) result.delete(filename)
+        else if (!this.hasDisplayMatch(current) && this.hasDisplayMatch(other))
+          result.set(filename, other)
+      }
+    }
+    return result
+  }
+
+  private hasDisplayMatch(hit: SearchHit): boolean {
+    return hit.rawMatch !== null || hit.fuzzyQuery !== null
+  }
+
+  private async termHits(
+    term: Extract<SearchQueryNode, { type: 'term' }>,
+    field: SearchField
+  ): Promise<Map<string, SearchHit>> {
+    if (field === 'file') return this.filenameHits(term)
+    if (term.match !== 'fuzzy') {
+      const fields: ('body' | 'extra')[] = field === 'content' ? ['body', 'extra'] : [field]
+      const matches = await this.runRawSearch(
+        term.value,
+        term.match === 'regex',
+        term.flags,
+        fields,
+        Math.max(this.rawSearchCorpus.length, 1)
+      )
+      return new Map(
+        this.toSearchHits(
+          matches.map((match) => [match.filename, match]),
+          null
+        ).map((hit) => [hit.filename, hit])
+      )
+    }
+
+    const fuzzyQuery = this.prepareFuzzyQuery(term.value)
+    const candidates: FuzzyCandidate[] = this.searchIndex.search(term.value, {
       enrich: true,
       limit: Math.max(this.notes.size, 1),
-      merge: true
+      merge: true,
+      index: field === 'content' ? ['body', 'extra'] : field
     })
-    return this.toSearchHits(candidates.map((entry) => [String(entry.id), null]))
+    const hits = this.toSearchHits(
+      candidates.map((entry) => [String(entry.id), null]),
+      fuzzyQuery
+    )
+    return new Map(hits.map((hit) => [hit.filename, hit]))
   }
 
-  /**
-   * Bypasses FlexSearch's tokenizer entirely - a query wrapped in
-   * `/pattern/flags` is compiled as a linear-time RE2 regex (see parseRawQuery),
-   * anything else is a literal, non-normalized substring match. Runs in a
-   * worker thread against a corpus mirrored on every reindex, so this never
-   * blocks the Electron main process (see spawnSearchWorker/syncSearchWorker).
-   * Every match, in corpus order.
-   */
-  private async rawHits(trimmed: string): Promise<SearchHit[]> {
-    const { pattern, isRegex, flags } = this.parseRawQuery(trimmed)
-    const matches = await this.runRawSearch(
-      pattern,
-      isRegex,
-      flags,
-      Math.max(this.rawSearchCorpus.length, 1)
-    )
-    return this.toSearchHits(matches.map((match) => [match.filename, match]))
+  private filenameHits(term: Extract<SearchQueryNode, { type: 'term' }>): Map<string, SearchHit> {
+    const result = new Map<string, SearchHit>()
+    const regex =
+      term.match === 'regex'
+        ? new RE2(term.value, term.flags.includes('u') ? term.flags : `${term.flags}u`)
+        : null
+    const needle = this.normalize(term.value)
+    let rank = 0
+    for (const note of this.notes.values()) {
+      const matches = regex
+        ? regex.test(note.filename)
+        : this.normalize(note.filename).includes(needle)
+      if (matches) {
+        result.set(note.filename, {
+          filename: note.filename,
+          note,
+          rawMatch: null,
+          fuzzyQuery: null,
+          engineRank: rank++
+        })
+      }
+    }
+    return result
   }
 
   /** Resolves engine results against the live index, dropping any the index no longer holds. */
   private toSearchHits(
-    entries: [filename: string, rawMatch: RawSearchMatch | null][]
+    entries: [filename: string, rawMatch: RawSearchMatch | null][],
+    fuzzyQuery: FuzzyQuery | null
   ): SearchHit[] {
     const hits: SearchHit[] = []
-    for (const [filename, rawMatch] of entries) {
+    for (const [engineRank, [filename, rawMatch]] of entries.entries()) {
       const note = this.notes.get(filename)
       if (note) {
-        hits.push({ filename, note, rawMatch })
+        hits.push({ filename, note, rawMatch, fuzzyQuery, engineRank })
       }
     }
     return hits
   }
 
-  private toSearchResult(hit: SearchHit, query: FuzzyQuery): SearchResult {
+  private toSearchResult(hit: SearchHit): SearchResult {
     const located = hit.rawMatch
       ? this.locateRawMatch(hit.rawMatch)
-      : this.locateFuzzyMatch(hit.note, query)
+      : hit.fuzzyQuery
+        ? this.locateFuzzyMatch(hit.note, hit.fuzzyQuery)
+        : null
     return { filename: hit.filename, ...buildMatchDisplay(hit.note, located) }
-  }
-
-  private parseRawQuery(trimmed: string): { pattern: string; isRegex: boolean; flags: string } {
-    const delimited = /^\/(.+)\/([a-z]*)$/.exec(trimmed)
-    if (delimited && /^[ims]*$/.test(delimited[2])) {
-      return { pattern: delimited[1], isRegex: true, flags: delimited[2] }
-    }
-    return { pattern: trimmed, isRegex: false, flags: '' }
   }
 
   private runRawSearch(
     pattern: string,
     isRegex: boolean,
     flags: string,
+    fields: ('body' | 'extra')[],
     limit: number
   ): Promise<RawSearchMatch[]> {
     return new Promise((resolve, reject) => {
@@ -413,6 +517,7 @@ export class NoteStore extends EventEmitter {
         pattern,
         isRegex,
         flags,
+        fields,
         limit
       }
       this.searchWorker.postMessage(request)

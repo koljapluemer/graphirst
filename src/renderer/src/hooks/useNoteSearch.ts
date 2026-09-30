@@ -28,7 +28,7 @@ export function useNoteSearch(
   options: UseNoteSearchOptions = {}
 ): UseNoteSearchResult {
   const { page = 0, enabled = true, onError } = options
-  const { mode, orphan } = criteria
+  const { orphan } = criteria
   const [results, setResults] = useState<SearchResult[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -57,7 +57,7 @@ export function useNoteSearch(
       setLoading(true)
 
       try {
-        const response = await window.api.notes.search({ query, mode, orphan, page })
+        const response = await window.api.notes.search({ query, orphan, page })
         if (ignore) {
           return
         }
@@ -82,7 +82,7 @@ export function useNoteSearch(
     return () => {
       ignore = true
     }
-  }, [enabled, deferredQuery, mode, orphan, page, changeNonce])
+  }, [enabled, deferredQuery, orphan, page, changeNonce])
 
   return { results, total, loading }
 }

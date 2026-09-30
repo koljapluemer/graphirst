@@ -1,4 +1,4 @@
-import type { OrphanFilter, SearchMode } from '../../../../shared/notes'
+import type { OrphanFilter } from '../../../../shared/notes'
 
 const ORPHAN_OPTIONS: { value: OrphanFilter; label: string }[] = [
   { value: 'any', label: 'Any' },
@@ -7,16 +7,12 @@ const ORPHAN_OPTIONS: { value: OrphanFilter; label: string }[] = [
 ]
 
 export interface SearchOptionsProps {
-  mode: SearchMode
-  onModeChange: (mode: SearchMode) => void
   orphan: OrphanFilter
   onOrphanChange: (orphan: OrphanFilter) => void
 }
 
 /** Collapsible search refinements shown under the sidebar's search input. */
 export default function SearchOptions({
-  mode,
-  onModeChange,
   orphan,
   onOrphanChange
 }: SearchOptionsProps): React.JSX.Element {
@@ -26,18 +22,6 @@ export default function SearchOptions({
         Options
       </summary>
       <div className="collapse-content space-y-2 px-1">
-        <label
-          className="flex items-center justify-between gap-2"
-          title="Wrap a query in /pattern/flags/ for regex, otherwise it matches literal text (including punctuation)"
-        >
-          Raw / regex
-          <input
-            type="checkbox"
-            className="checkbox checkbox-xs"
-            checked={mode === 'raw'}
-            onChange={(event) => onModeChange(event.target.checked ? 'raw' : 'fuzzy')}
-          />
-        </label>
         <label className="flex items-center justify-between gap-2">
           Orphan
           <select

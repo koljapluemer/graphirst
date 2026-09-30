@@ -15,8 +15,8 @@ export interface PaneSearchMenuProps {
  * The right-click "open note here" popover (tckt/issues/right-click-open-note-here-feature.md):
  * a mini version of the sidebar search, anchored at the cursor. Picking a result doesn't close
  * the menu - the query stays put so the same search can pin several matches in a row without
- * retyping it each time. Only Escape or clicking elsewhere closes it. Always a plain fuzzy
- * search over every note, first page only - refinements live in the sidebar.
+ * retyping it each time. Only Escape or clicking elsewhere closes it. Uses the same query
+ * language as sidebar search, over every note and on the first page only.
  */
 export default function PaneSearchMenu({
   screenPosition,
@@ -25,7 +25,7 @@ export default function PaneSearchMenu({
   onClose
 }: PaneSearchMenuProps): React.JSX.Element {
   const [query, setQuery] = useState('')
-  const { results, loading } = useNoteSearch({ query, mode: 'fuzzy', orphan: 'any' })
+  const { results, loading } = useNoteSearch({ query, orphan: 'any' })
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 

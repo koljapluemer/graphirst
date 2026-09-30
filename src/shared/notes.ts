@@ -118,20 +118,11 @@ export interface RecentNote {
   timestamp: string
 }
 
-/**
- * 'fuzzy' is the default FlexSearch-backed token search. 'raw' bypasses
- * tokenization entirely (literal, non-stripped substring matching) and
- * additionally treats a query wrapped in `/pattern/flags` as a regular
- * expression - see NoteStore.search.
- */
-export type SearchMode = 'fuzzy' | 'raw'
-
 /** Narrows search results by whether a note has any relationship, incoming or outgoing. */
 export type OrphanFilter = 'any' | 'orphan' | 'connected'
 
 export interface SearchCriteria {
   query: string
-  mode: SearchMode
   orphan: OrphanFilter
 }
 

@@ -17,6 +17,7 @@ export type RawSearchWorkerRequest =
       pattern: string
       isRegex: boolean
       flags: string
+      fields: ('body' | 'extra')[]
       limit: number
     }
 

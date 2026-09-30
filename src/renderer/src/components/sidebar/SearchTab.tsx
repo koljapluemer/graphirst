@@ -1,7 +1,9 @@
-import { LoaderCircle, Search } from 'lucide-react'
+import { CircleHelp, LoaderCircle, Search } from 'lucide-react'
+import { useState } from 'react'
 import NoteListItem from './NoteListItem'
 import PagedNoteList from './PagedNoteList'
 import SearchOptions from './SearchOptions'
+import SearchHelpModal from './SearchHelpModal'
 import type { SearchEvent, SearchState } from './search-state'
 import type { SearchResult } from '../../../../shared/notes'
 
@@ -31,25 +33,37 @@ export default function SearchTab({
   onSelectNote
 }: SearchTabProps): React.JSX.Element {
   const { criteria, page } = state
+  const [helpOpen, setHelpOpen] = useState(false)
 
   return (
     <>
       <div className="border-b border-base-300 px-4 pt-4 pb-2">
-        <label className="input w-full">
-          <Search className="size-4.5 text-base-content/60" />
-          <input
-            value={criteria.query}
-            list={HISTORY_LIST_ID}
-            onChange={(event) => dispatch({ type: 'SET_QUERY', query: event.target.value })}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && results[0]) {
-                onSelectNote(results[0].filename)
-              }
-            }}
-            placeholder="Search notes…"
-          />
-          {loading ? <LoaderCircle className="size-4 animate-spin text-base-content/60" /> : null}
-        </label>
+        <div className="flex items-center gap-2">
+          <label className="input min-w-0 flex-1">
+            <Search className="size-4.5 text-base-content/60" />
+            <input
+              value={criteria.query}
+              list={HISTORY_LIST_ID}
+              onChange={(event) => dispatch({ type: 'SET_QUERY', query: event.target.value })}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && results[0]) {
+                  onSelectNote(results[0].filename)
+                }
+              }}
+              placeholder="Search notes…"
+            />
+            {loading ? <LoaderCircle className="size-4 animate-spin text-base-content/60" /> : null}
+          </label>
+          <button
+            type="button"
+            className="btn btn-ghost btn-square btn-sm"
+            aria-label="Search syntax help"
+            title="Search syntax"
+            onClick={() => setHelpOpen(true)}
+          >
+            <CircleHelp className="size-4.5" />
+          </button>
+        </div>
         <datalist id={HISTORY_LIST_ID}>
           {history.map((entry) => (
             <option key={entry} value={entry} />
@@ -57,8 +71,6 @@ export default function SearchTab({
         </datalist>
 
         <SearchOptions
-          mode={criteria.mode}
-          onModeChange={(mode) => dispatch({ type: 'SET_MODE', mode })}
           orphan={criteria.orphan}
           onOrphanChange={(orphan) => dispatch({ type: 'SET_ORPHAN', orphan })}
         />
@@ -82,6 +94,7 @@ export default function SearchTab({
           />
         ))}
       </PagedNoteList>
+      {helpOpen ? <SearchHelpModal onClose={() => setHelpOpen(false)} /> : null}
     </>
   )
 }

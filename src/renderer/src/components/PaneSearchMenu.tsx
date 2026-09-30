@@ -1,8 +1,7 @@
 import { LoaderCircle, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNoteSearch } from '../hooks/useNoteSearch'
-import SearchModeToggle from './SearchModeToggle'
-import type { SearchMode, SearchResult } from '../../../shared/notes'
+import type { SearchResult } from '../../../shared/notes'
 
 export interface PaneSearchMenuProps {
   /** Viewport (clientX/clientY) coordinates of the right-click that opened this menu. */
@@ -16,7 +15,8 @@ export interface PaneSearchMenuProps {
  * The right-click "open note here" popover (tckt/issues/right-click-open-note-here-feature.md):
  * a mini version of the sidebar search, anchored at the cursor. Picking a result doesn't close
  * the menu - the query stays put so the same search can pin several matches in a row without
- * retyping it each time. Only Escape or clicking elsewhere closes it.
+ * retyping it each time. Only Escape or clicking elsewhere closes it. Always a plain fuzzy
+ * search over every note, first page only - refinements live in the sidebar.
  */
 export default function PaneSearchMenu({
   screenPosition,
@@ -25,8 +25,7 @@ export default function PaneSearchMenu({
   onClose
 }: PaneSearchMenuProps): React.JSX.Element {
   const [query, setQuery] = useState('')
-  const [mode, setMode] = useState<SearchMode>('fuzzy')
-  const { results, loading } = useNoteSearch(query, { mode })
+  const { results, loading } = useNoteSearch({ query, mode: 'fuzzy', orphan: 'any' })
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -71,10 +70,6 @@ export default function PaneSearchMenu({
         {loading ? (
           <LoaderCircle className="size-4 shrink-0 animate-spin text-base-content/60" />
         ) : null}
-        <SearchModeToggle
-          mode={mode}
-          onToggle={() => setMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy'))}
-        />
       </label>
 
       {query.trim() ? (

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 import { AlertTriangle, FolderOpen, LoaderCircle, Moon, Settings2, Sun } from 'lucide-react'
 import GraphCanvas from './components/GraphCanvas'
 import Sidebar from './components/sidebar/Sidebar'
+import { INITIAL_SEARCH_STATE, searchReducer } from './components/sidebar/search-state'
 import {
   MANUAL_PIN_DEPTH,
   PIN_ALL_CAP,
@@ -10,8 +11,9 @@ import {
   useNoteGraph
 } from './hooks/useNoteGraph'
 import { useNoteSearch } from './hooks/useNoteSearch'
+import { useSearchHistory } from './hooks/useSearchHistory'
 import { useTheme } from './hooks/useTheme'
-import type { IndexProgress, NotesBootstrap, SearchMode } from '../../shared/notes'
+import type { IndexProgress, NotesBootstrap } from '../../shared/notes'
 
 function App(): React.JSX.Element {
   const [theme, setTheme] = useTheme()
@@ -29,8 +31,8 @@ function App(): React.JSX.Element {
     clearPins,
     refetch
   } = useNoteGraph()
-  const [query, setQuery] = useState('')
-  const [searchMode, setSearchMode] = useState<SearchMode>('fuzzy')
+  const [search, dispatchSearch] = useReducer(searchReducer, INITIAL_SEARCH_STATE)
+  const searchHistory = useSearchHistory()
   const [bootLoading, setBootLoading] = useState(true)
   const [indexProgress, setIndexProgress] = useState<IndexProgress | null>(null)
   const [settingsBusy, setSettingsBusy] = useState(false)
@@ -39,10 +41,14 @@ function App(): React.JSX.Element {
   const [orphanBusy, setOrphanBusy] = useState(false)
   const [randomNoteBusy, setRandomNoteBusy] = useState(false)
   const [pinAllBusy, setPinAllBusy] = useState(false)
-  const { results, loading: searchLoading } = useNoteSearch(query, {
+  const {
+    results,
+    total: searchTotal,
+    loading: searchLoading
+  } = useNoteSearch(search.criteria, {
+    page: search.page,
     enabled: bootstrap?.status === 'ready',
-    onError: (error) => setErrorMessage(error.message),
-    mode: searchMode
+    onError: (error) => setErrorMessage(error.message)
   })
 
   useEffect(() => {
@@ -156,11 +162,11 @@ function App(): React.JSX.Element {
     setPinAllBusy(true)
     try {
       const { filenames, total } = await window.api.notes.searchFilenames(
-        query,
-        searchMode,
+        search.criteria,
         PIN_ALL_CAP
       )
       pinNotes(filenames, PIN_ALL_DEPTH)
+      searchHistory.record(search.criteria.query)
       setErrorMessage(
         total > filenames.length
           ? `Pinned the first ${filenames.length} of ${total} matches.`
@@ -171,6 +177,11 @@ function App(): React.JSX.Element {
     } finally {
       setPinAllBusy(false)
     }
+  }
+
+  const handleSelectSearchResult = (filename: string): void => {
+    pinNote(filename, SEARCH_RESULT_PIN_DEPTH)
+    searchHistory.record(search.criteria.query)
   }
 
   const handleOpenRandomSearchResult = (): void => {
@@ -237,7 +248,7 @@ function App(): React.JSX.Element {
               onOpenRandomSearchResult={handleOpenRandomSearchResult}
               openRandomSearchResultDisabled={results.length === 0}
               onPinAllSearchResults={() => void handlePinAllSearchResults()}
-              pinAllSearchResultsDisabled={results.length === 0 || pinAllBusy}
+              pinAllSearchResultsDisabled={searchTotal === 0 || pinAllBusy}
             />
           ) : (
             <UnavailableState bootstrap={bootstrap} onOpenSettings={() => setSettingsOpen(true)} />
@@ -246,12 +257,13 @@ function App(): React.JSX.Element {
 
         <Sidebar
           search={{
-            query,
-            onQueryChange: setQuery,
-            mode: searchMode,
-            onToggleMode: () => setSearchMode((current) => (current === 'fuzzy' ? 'raw' : 'fuzzy')),
+            state: search,
+            dispatch: dispatchSearch,
             results,
-            loading: searchLoading
+            total: searchTotal,
+            loading: searchLoading,
+            history: searchHistory.history,
+            onSelectNote: handleSelectSearchResult
           }}
           pins={pins}
           onSelectNote={(filename) => pinNote(filename, SEARCH_RESULT_PIN_DEPTH)}

@@ -4,9 +4,8 @@ import type { IndexProgress, NotesApi } from '../shared/notes'
 
 const notesApi: NotesApi = {
   getBootstrap: () => ipcRenderer.invoke('notes:get-bootstrap'),
-  search: (query, mode) => ipcRenderer.invoke('notes:search', query, mode),
-  searchFilenames: (query, mode, cap) =>
-    ipcRenderer.invoke('notes:search-filenames', query, mode, cap),
+  search: (request) => ipcRenderer.invoke('notes:search', request),
+  searchFilenames: (criteria, cap) => ipcRenderer.invoke('notes:search-filenames', criteria, cap),
   recentNotes: (request) => ipcRenderer.invoke('notes:recent-notes', request),
   openGraph: (pins) => ipcRenderer.invoke('notes:graph', pins),
   pickDirectory: () => ipcRenderer.invoke('notes:pick-directory'),

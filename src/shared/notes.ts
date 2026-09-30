@@ -106,7 +106,6 @@ export interface SearchResult {
   previewMatch: MatchRange | null
   /** Excerpt around the match; set exactly when the match is not visible in `preview`. */
   excerpt: SearchExcerpt | null
-  score: number
 }
 
 /** Which lifecycle timestamp (see RawNoteFile) the recent-notes list is ordered by. */
@@ -127,6 +126,18 @@ export interface RecentNote {
  */
 export type SearchMode = 'fuzzy' | 'raw'
 
+/** Narrows search results by whether a note has any relationship, incoming or outgoing. */
+export type OrphanFilter = 'any' | 'orphan' | 'connected'
+
+export interface SearchCriteria {
+  query: string
+  mode: SearchMode
+  orphan: OrphanFilter
+}
+
+/** Results per page for every paginated note list (search, recent). */
+export const NOTE_LIST_PAGE_SIZE = 40
+
 /** Progress ticks emitted while rebuildIndex works through the note directory, so the UI can show a determinate count instead of an indefinite spinner. */
 export interface IndexProgress {
   loaded: number
@@ -141,9 +152,17 @@ export interface NotesBootstrap {
   pins?: PinSpec[]
 }
 
+export interface NotesSearchRequest extends SearchCriteria {
+  /** Zero-based page of NOTE_LIST_PAGE_SIZE results. */
+  page: number
+}
+
 export interface NotesSearchResponse {
   graphPath: string
+  /** The requested page, in the same order across every page. */
   results: SearchResult[]
+  /** Every match, across all pages. */
+  total: number
 }
 
 export interface SearchFilenamesResponse {
@@ -155,11 +174,15 @@ export interface SearchFilenamesResponse {
 
 export interface RecentNotesRequest {
   sort: RecentNotesSort
+  /** Zero-based page of NOTE_LIST_PAGE_SIZE results. */
+  page: number
 }
 
 export interface RecentNotesResponse {
-  /** Newest first. Notes never stamped with the requested timestamp are omitted. */
+  /** The requested page, newest first. Notes never stamped with the requested timestamp are omitted. */
   results: RecentNote[]
+  /** Every stamped note, across all pages. */
+  total: number
 }
 
 export interface NotesGraphResponse {
@@ -278,12 +301,8 @@ export interface UndoDeleteResponse {
 
 export interface NotesApi {
   getBootstrap: () => Promise<NotesBootstrap>
-  search: (query: string, mode?: SearchMode) => Promise<NotesSearchResponse>
-  searchFilenames: (
-    query: string,
-    mode: SearchMode,
-    cap: number
-  ) => Promise<SearchFilenamesResponse>
+  search: (request: NotesSearchRequest) => Promise<NotesSearchResponse>
+  searchFilenames: (criteria: SearchCriteria, cap: number) => Promise<SearchFilenamesResponse>
   recentNotes: (request: RecentNotesRequest) => Promise<RecentNotesResponse>
   openGraph: (pins: PinSpec[]) => Promise<NotesGraphResponse>
   pickDirectory: () => Promise<NotesBootstrap>

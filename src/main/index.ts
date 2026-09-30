@@ -26,11 +26,12 @@ import type {
   DeleteRelationRequest,
   IndexProgress,
   MediaFileRequest,
+  NotesSearchRequest,
   PinSpec,
   RandomNoteRequest,
   RandomOrphanRequest,
   RecentNotesRequest,
-  SearchMode,
+  SearchCriteria,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
@@ -194,14 +195,14 @@ app.whenReady().then(() => {
     return noteStore.getBootstrap()
   })
 
-  ipcMain.handle('notes:search', async (_event, query: string, mode?: SearchMode) => {
-    return noteStore.search(query, mode)
+  ipcMain.handle('notes:search', async (_event, request: NotesSearchRequest) => {
+    return noteStore.search(request)
   })
 
   ipcMain.handle(
     'notes:search-filenames',
-    async (_event, query: string, mode: SearchMode, cap: number) => {
-      return noteStore.searchFilenames(query, mode, cap)
+    async (_event, criteria: SearchCriteria, cap: number) => {
+      return noteStore.searchFilenames(criteria, cap)
     }
   )
 

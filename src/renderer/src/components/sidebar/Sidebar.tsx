@@ -9,7 +9,8 @@ const TABS: { tab: SidebarTab; label: string }[] = [
 ]
 
 export interface SidebarProps {
-  search: Omit<SearchTabProps, 'pins' | 'onSelectNote'>
+  /** Carries its own onSelectNote: App records search selections in the search history. */
+  search: Omit<SearchTabProps, 'pins'>
   pins: ReadonlyMap<string, number>
   onSelectNote: (filename: string) => void
   onError: (error: Error) => void
@@ -41,11 +42,13 @@ export default function Sidebar({
       </div>
 
       {state.tab === 'search' ? (
-        <SearchTab {...search} pins={pins} onSelectNote={onSelectNote} />
+        <SearchTab {...search} pins={pins} />
       ) : (
         <RecentTab
           sort={state.recentSort}
           onSortChange={(sort) => dispatch({ type: 'SELECT_RECENT_SORT', sort })}
+          page={state.recentPage}
+          onPageChange={(page) => dispatch({ type: 'SET_RECENT_PAGE', page })}
           pins={pins}
           onSelectNote={onSelectNote}
           onError={onError}

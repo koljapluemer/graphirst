@@ -1,16 +1,18 @@
 import { startTransition, useDeferredValue, useEffect, useRef, useState } from 'react'
-import type { SearchMode, SearchResult } from '../../../shared/notes'
+import type { SearchCriteria, SearchResult } from '../../../shared/notes'
 
 export interface UseNoteSearchOptions {
+  /** Zero-based results page. @default 0 */
+  page?: number
   /** Skip searching entirely, e.g. while the graph isn't indexed/ready yet. */
   enabled?: boolean
   onError?: (error: Error) => void
-  /** @default 'fuzzy' */
-  mode?: SearchMode
 }
 
 export interface UseNoteSearchResult {
   results: SearchResult[]
+  /** Every match across all pages. */
+  total: number
   loading: boolean
 }
 
@@ -22,14 +24,16 @@ export interface UseNoteSearchResult {
  * graph view does, so results don't go stale after a create/edit/delete.
  */
 export function useNoteSearch(
-  query: string,
+  criteria: SearchCriteria,
   options: UseNoteSearchOptions = {}
 ): UseNoteSearchResult {
-  const { enabled = true, onError, mode = 'fuzzy' } = options
+  const { page = 0, enabled = true, onError } = options
+  const { mode, orphan } = criteria
   const [results, setResults] = useState<SearchResult[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [changeNonce, setChangeNonce] = useState(0)
-  const deferredQuery = useDeferredValue(query)
+  const deferredQuery = useDeferredValue(criteria.query)
   // Ref rather than a dependency: onError is commonly an inline callback that
   // gets a new identity every render, and that shouldn't re-trigger the search.
   const onErrorRef = useRef(onError)
@@ -43,27 +47,24 @@ export function useNoteSearch(
     let ignore = false
 
     const runSearch = async (): Promise<void> => {
-      if (!enabled) {
+      const query = deferredQuery.trim()
+      if (!enabled || !query) {
         setResults([])
-        return
-      }
-
-      const trimmed = deferredQuery.trim()
-      if (!trimmed) {
-        setResults([])
+        setTotal(0)
         return
       }
 
       setLoading(true)
 
       try {
-        const response = await window.api.notes.search(trimmed, mode)
+        const response = await window.api.notes.search({ query, mode, orphan, page })
         if (ignore) {
           return
         }
 
         startTransition(() => {
           setResults(response.results)
+          setTotal(response.total)
         })
       } catch (error) {
         if (!ignore) {
@@ -81,7 +82,7 @@ export function useNoteSearch(
     return () => {
       ignore = true
     }
-  }, [enabled, deferredQuery, changeNonce, mode])
+  }, [enabled, deferredQuery, mode, orphan, page, changeNonce])
 
-  return { results, loading }
+  return { results, total, loading }
 }

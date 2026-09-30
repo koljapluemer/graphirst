@@ -16,6 +16,7 @@ import {
 import { MAX_VIDEO_ATTACHMENT_BYTES } from '../shared/media'
 import { selectRecentNotes } from './recent-notes'
 import { buildMatchDisplay, locateFuzzyMatch, type LocatedMatch } from './search-match-display'
+import { matchesOrphanFilter, orderByHeadScore } from './search-ordering'
 import type {
   AttachImageRequest,
   AttachImageResponse,
@@ -36,6 +37,7 @@ import type {
   NoteRelationTuple,
   NotesBootstrap,
   NotesGraphResponse,
+  NotesSearchRequest,
   NotesSearchResponse,
   PinSpec,
   RandomNoteRequest,
@@ -45,13 +47,14 @@ import type {
   RawNoteFile,
   RecentNotesRequest,
   RecentNotesResponse,
+  SearchCriteria,
   SearchFilenamesResponse,
-  SearchMode,
   SearchResult,
   UndoDeleteResponse,
   UpdateNoteRequest,
   UpdateRelationRequest
 } from '../shared/notes'
+import { NOTE_LIST_PAGE_SIZE } from '../shared/notes'
 import type {
   RawSearchCorpusEntry,
   RawSearchMatch,
@@ -60,7 +63,6 @@ import type {
 } from './search-worker-types'
 
 const SETTINGS_FILE_NAME = 'graphirst-settings.json'
-const MAX_SEARCH_RESULTS = 40
 /**
  * Subtracted from the score of a result that matched only in a note's extra
  * content (nothing in the body). Large enough to sink every such result below
@@ -71,8 +73,6 @@ const EXTRA_ONLY_RANK_PENALTY = 100_000
 const MAX_DIRECT_RELATIONS = 28
 const MAX_SECONDARY_RELATIONS = 12
 const MAX_GRAPH_NODES = 140
-/** Candidates ranked per query by both search modes (FlexSearch `limit` / raw worker scan cap). */
-const SEARCH_CANDIDATE_LIMIT = 120
 /** Defense in depth only - RE2 is linear-time, so this should never actually fire. */
 const RAW_SEARCH_TIMEOUT_MS = 5000
 /**
@@ -91,8 +91,25 @@ interface FuzzyCandidate {
   id: number | string
 }
 
-function byScoreThenFilename(left: SearchResult, right: SearchResult): number {
-  return right.score - left.score || left.filename.localeCompare(right.filename)
+/** A fuzzy query folded once per search, the way every note field is folded before comparing. */
+interface FuzzyQuery {
+  normalized: string
+  tokens: string[]
+}
+
+interface FuzzyMatchedFields {
+  /** Folded body and extra content. */
+  body: string
+  extra: string
+  /** Matched in the extra content and nowhere in the body. */
+  extraOnly: boolean
+}
+
+/** One matching note, in result order; `rawMatch` is set for raw/regex searches and carries where it matched. */
+interface SearchHit {
+  filename: string
+  note: IndexedNote
+  rawMatch: RawSearchMatch | null
 }
 
 /** `('image', 'jpeg')` -> `'jpg'`, `('video', 'quicktime')` -> `'mov'`; otherwise the subtype as-is. */
@@ -269,91 +286,62 @@ export class NoteStore extends EventEmitter {
     return this.getBootstrap()
   }
 
-  async search(query: string, mode: SearchMode = 'fuzzy'): Promise<NotesSearchResponse> {
+  async search(request: NotesSearchRequest): Promise<NotesSearchResponse> {
     await this.ensureIndexed()
     this.assertIndexReady()
 
-    const trimmed = query.trim()
-    if (!trimmed) {
-      return {
-        graphPath: this.graphPath,
-        results: []
-      }
-    }
-
-    const ranked = mode === 'raw' ? await this.searchRaw(trimmed) : this.searchFuzzy(trimmed)
+    const hits = await this.orderedHits(request)
+    const start = request.page * NOTE_LIST_PAGE_SIZE
+    const query = this.prepareFuzzyQuery(request.query.trim())
 
     return {
       graphPath: this.graphPath,
-      results: ranked
+      results: hits
+        .slice(start, start + NOTE_LIST_PAGE_SIZE)
+        .map((hit) => this.toSearchResult(hit, query)),
+      total: hits.length
     }
   }
 
-  private searchFuzzy(trimmed: string): SearchResult[] {
-    const candidates = this.fuzzyCandidates(trimmed, SEARCH_CANDIDATE_LIMIT)
-    return this.rankFuzzyCandidates(candidates, trimmed).slice(0, MAX_SEARCH_RESULTS)
-  }
-
-  /**
-   * Filenames of every match (not just the displayed page), best first, capped at
-   * `cap`. Only the leading candidates are ranked - the same pool `search` ranks -
-   * so the best hits match what the sidebar shows, while `total` still counts every
-   * match. Runs off the same index/worker as `search`, so broad queries on a huge
-   * corpus never build previews for more than the ranked pool.
-   */
-  async searchFilenames(
-    query: string,
-    mode: SearchMode,
-    cap: number
-  ): Promise<SearchFilenamesResponse> {
+  /** Filenames of the first `cap` matches, in the same order `search` pages through, plus the full match count. */
+  async searchFilenames(criteria: SearchCriteria, cap: number): Promise<SearchFilenamesResponse> {
     await this.ensureIndexed()
     this.assertIndexReady()
 
-    const trimmed = query.trim()
+    const hits = await this.orderedHits(criteria)
+    return { filenames: hits.slice(0, cap).map((hit) => hit.filename), total: hits.length }
+  }
+
+  /**
+   * Every note matching `criteria`, in final result order (see orderByHeadScore).
+   * Only filenames and notes are carried - match display is built later, for the
+   * requested page alone, so a broad query never builds 100k excerpts.
+   */
+  private async orderedHits(criteria: SearchCriteria): Promise<SearchHit[]> {
+    const trimmed = criteria.query.trim()
     if (!trimmed) {
-      return { filenames: [], total: 0 }
+      return []
     }
 
-    const poolSize = Math.max(SEARCH_CANDIDATE_LIMIT, cap)
-    const everyLimit = Math.max(this.notes.size, poolSize)
-    const { total, ranked } =
-      mode === 'raw'
-        ? await this.rankRawPool(trimmed, poolSize, everyLimit)
-        : this.rankFuzzyPool(trimmed, poolSize, everyLimit)
-
-    return { filenames: ranked.slice(0, cap).map((result) => result.filename), total }
+    const engineOrder =
+      criteria.mode === 'raw' ? await this.rawHits(trimmed) : this.fuzzyHits(trimmed)
+    const kept = engineOrder.filter((hit) => matchesOrphanFilter(hit.note, criteria.orphan))
+    const query = this.prepareFuzzyQuery(trimmed)
+    return orderByHeadScore(kept, (hit, engineRank) =>
+      hit.rawMatch
+        ? this.scoreRawHit(hit.note, engineRank, hit.rawMatch)
+        : this.scoreFuzzyHit(hit.note, engineRank, query)
+    )
   }
 
-  private rankFuzzyPool(
-    trimmed: string,
-    poolSize: number,
-    everyLimit: number
-  ): { total: number; ranked: SearchResult[] } {
-    const candidates = this.fuzzyCandidates(trimmed, everyLimit)
-    return {
-      total: candidates.length,
-      ranked: this.rankFuzzyCandidates(candidates.slice(0, poolSize), trimmed)
-    }
-  }
-
-  private async rankRawPool(
-    trimmed: string,
-    poolSize: number,
-    everyLimit: number
-  ): Promise<{ total: number; ranked: SearchResult[] }> {
-    const matches = await this.rawMatches(trimmed, everyLimit)
-    return { total: matches.length, ranked: this.rankRawMatches(matches.slice(0, poolSize)) }
-  }
-
-  private fuzzyCandidates(trimmed: string, limit: number): FuzzyCandidate[] {
-    return this.searchIndex.search(trimmed, { enrich: true, limit, merge: true })
-  }
-
-  private rankFuzzyCandidates(candidates: FuzzyCandidate[], trimmed: string): SearchResult[] {
-    return candidates
-      .map((entry, index) => this.rankSearchResult(entry.id, index, trimmed))
-      .filter((result): result is SearchResult => result !== null)
-      .sort(byScoreThenFilename)
+  /** Every fuzzy match, in FlexSearch's relevance order. */
+  private fuzzyHits(trimmed: string): SearchHit[] {
+    const candidates: FuzzyCandidate[] = this.searchIndex.search(trimmed, {
+      enrich: true,
+      limit: Math.max(this.notes.size, 1),
+      merge: true
+    })
+    return this.toSearchHits(candidates.map((entry) => [String(entry.id), null]))
   }
 
   /**
@@ -362,22 +350,38 @@ export class NoteStore extends EventEmitter {
    * anything else is a literal, non-normalized substring match. Runs in a
    * worker thread against a corpus mirrored on every reindex, so this never
    * blocks the Electron main process (see spawnSearchWorker/syncSearchWorker).
+   * Every match, in corpus order.
    */
-  private rankRawMatches(matches: RawSearchMatch[]): SearchResult[] {
-    return matches
-      .map((match, index) => this.rankRawResult(match, index))
-      .filter((result): result is SearchResult => result !== null)
-      .sort(byScoreThenFilename)
-  }
-
-  private async searchRaw(trimmed: string): Promise<SearchResult[]> {
-    const matches = await this.rawMatches(trimmed, SEARCH_CANDIDATE_LIMIT)
-    return this.rankRawMatches(matches).slice(0, MAX_SEARCH_RESULTS)
-  }
-
-  private rawMatches(trimmed: string, limit: number): Promise<RawSearchMatch[]> {
+  private async rawHits(trimmed: string): Promise<SearchHit[]> {
     const { pattern, isRegex, flags } = this.parseRawQuery(trimmed)
-    return this.runRawSearch(pattern, isRegex, flags, limit)
+    const matches = await this.runRawSearch(
+      pattern,
+      isRegex,
+      flags,
+      Math.max(this.rawSearchCorpus.length, 1)
+    )
+    return this.toSearchHits(matches.map((match) => [match.filename, match]))
+  }
+
+  /** Resolves engine results against the live index, dropping any the index no longer holds. */
+  private toSearchHits(
+    entries: [filename: string, rawMatch: RawSearchMatch | null][]
+  ): SearchHit[] {
+    const hits: SearchHit[] = []
+    for (const [filename, rawMatch] of entries) {
+      const note = this.notes.get(filename)
+      if (note) {
+        hits.push({ filename, note, rawMatch })
+      }
+    }
+    return hits
+  }
+
+  private toSearchResult(hit: SearchHit, query: FuzzyQuery): SearchResult {
+    const located = hit.rawMatch
+      ? this.locateRawMatch(hit.rawMatch)
+      : this.locateFuzzyMatch(hit.note, query)
+    return { filename: hit.filename, ...buildMatchDisplay(hit.note, located) }
   }
 
   private parseRawQuery(trimmed: string): { pattern: string; isRegex: boolean; flags: string } {
@@ -780,7 +784,7 @@ export class NoteStore extends EventEmitter {
     await this.ensureIndexed()
     this.assertIndexReady()
 
-    return { results: selectRecentNotes(this.notes.values(), request.sort) }
+    return selectRecentNotes(this.notes.values(), request.sort, request.page)
   }
 
   async randomNote(request: RandomNoteRequest): Promise<RandomNoteResponse> {
@@ -1602,60 +1606,56 @@ export class NoteStore extends EventEmitter {
     this.syncSearchWorker()
   }
 
-  private rankSearchResult(id: number | string, order: number, query: string): SearchResult | null {
-    const note = this.notes.get(String(id))
-    if (!note) {
-      return null
-    }
+  private prepareFuzzyQuery(trimmed: string): FuzzyQuery {
+    const normalized = this.normalize(trimmed)
+    return { normalized, tokens: this.tokenize(normalized) }
+  }
 
-    const normalizedQuery = this.normalize(query)
-    const queryTokens = this.tokenize(normalizedQuery)
+  /** Which of a note's fields a fuzzy query lands in, on case- and diacritic-folded text. */
+  private fuzzyMatchedFields(note: IndexedNote, query: FuzzyQuery): FuzzyMatchedFields {
     const body = this.normalize(note.body)
     const extra = this.normalize(note.extraContent)
+    const occursIn = (haystack: string): boolean =>
+      haystack.includes(query.normalized) || query.tokens.some((token) => haystack.includes(token))
 
-    let score = 1000 - order * 5
+    return {
+      body,
+      extra,
+      extraOnly: !occursIn(body) && occursIn(extra)
+    }
+  }
 
-    if (body.includes(normalizedQuery)) {
+  private scoreFuzzyHit(note: IndexedNote, engineRank: number, query: FuzzyQuery): number {
+    const { body, extra, extraOnly } = this.fuzzyMatchedFields(note, query)
+
+    let score = 1000 - engineRank * 5
+
+    if (body.includes(query.normalized)) {
       score += 140
     }
 
-    const haystacks = [body, extra]
-    const matchingTokens = queryTokens.filter((token) =>
-      haystacks.some((haystack) => haystack.includes(token))
+    const matchingTokens = query.tokens.filter(
+      (token) => body.includes(token) || extra.includes(token)
     )
     score += matchingTokens.length * 35
 
-    if (queryTokens.length > 1 && matchingTokens.length === queryTokens.length) {
+    if (query.tokens.length > 1 && matchingTokens.length === query.tokens.length) {
       score += 120
     }
 
     score += Math.min(note.degree, 24)
 
     // A hit that lives only in the extra content still belongs in the same result
-    // list, just after every body hit - sink it below them, and preview from the
-    // extra text so the match is actually visible.
-    const matchedInBody =
-      body.includes(normalizedQuery) || queryTokens.some((token) => body.includes(token))
-    const matchedInExtra =
-      extra.includes(normalizedQuery) || queryTokens.some((token) => extra.includes(token))
-    const extraOnly = matchedInExtra && !matchedInBody
-
+    // list, just after every body hit.
     if (extraOnly) {
       score -= EXTRA_ONLY_RANK_PENALTY
     }
 
-    const located = this.locateFuzzyMatch(note, normalizedQuery, queryTokens, extraOnly)
-
-    return { filename: note.filename, ...buildMatchDisplay(note, located), score }
+    return score
   }
 
-  private rankRawResult(match: RawSearchMatch, order: number): SearchResult | null {
-    const note = this.notes.get(match.filename)
-    if (!note) {
-      return null
-    }
-
-    let score = 1000 - order * 5
+  private scoreRawHit(note: IndexedNote, engineRank: number, match: RawSearchMatch): number {
+    let score = 1000 - engineRank * 5
 
     if (match.bodyIndex !== null) {
       score += 140
@@ -1663,30 +1663,21 @@ export class NoteStore extends EventEmitter {
 
     score += Math.min(note.degree, 24)
 
-    // Matched only in the extra content - keep it in the same list but after every
-    // body hit, and preview from the extra text where the match actually is.
-    const extraOnly = match.bodyIndex === null && match.extraIndex !== null
-    if (extraOnly) {
+    // Matched only in the extra content - keep it in the same list but after every body hit.
+    if (match.bodyIndex === null && match.extraIndex !== null) {
       score -= EXTRA_ONLY_RANK_PENALTY
     }
 
-    return {
-      filename: note.filename,
-      ...buildMatchDisplay(note, this.locateRawMatch(match)),
-      score
-    }
+    return score
   }
 
-  private locateFuzzyMatch(
-    note: IndexedNote,
-    normalizedQuery: string,
-    queryTokens: string[],
-    extraOnly: boolean
-  ): LocatedMatch | null {
+  /** Locates the match in the extra content when it isn't in the body, so the excerpt actually shows it. */
+  private locateFuzzyMatch(note: IndexedNote, query: FuzzyQuery): LocatedMatch | null {
     const normalize = (value: string): string => this.normalize(value)
+    const { extraOnly } = this.fuzzyMatchedFields(note, query)
     const field = extraOnly ? 'extra' : 'body'
     const compact = extraOnly ? note.extraCompact : note.bodyCompact
-    const range = locateFuzzyMatch(compact, normalizedQuery, queryTokens, normalize)
+    const range = locateFuzzyMatch(compact, query.normalized, query.tokens, normalize)
     return range ? { field, range } : null
   }
 
